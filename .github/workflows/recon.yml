@@ -53,7 +53,7 @@ jobs:
             cat "data/$program_name/subdomains.txt" | httpx -silent -ip -o "data/$program_name/active_hosts.txt"
             
             # 3. Scan Celah Keamanan (Nuclei)
-            nuclei -l "data/$program_name/active_hosts.txt" -tags exposures,misconfiguration,vulnerabilities -jsonl -o "data/$program_name/nuclei_results.json"
+            nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve,tech -jsonl -o "data/$program_name/nuclei_results.json"
             
             # 4. Kirim ke AI & HackerOne Draft
             PROGRAM_NAME=$program_name python scripts/validate.py
