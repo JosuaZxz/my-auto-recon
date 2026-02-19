@@ -82,21 +82,20 @@ def validate_findings():
     # --- [BAGIAN 3: INSTRUKSI AI (TRIAGE LEAD ROLE)] ---
     # Ini adalah "perintah rahasia" yang bikin AI kamu jadi pinter
     prompt = f"""
-    ROLE: You are the Senior Triage Lead at HackerOne.
-    TASK: Critically analyze these scan results for the program: {PROGRAM_NAME}.
-    
-    DATA TO REVIEW:
-    {json.dumps(findings_to_analyze)}
+    ROLE: Senior Security Researcher & Triage Specialist.
+    PROGRAM: {PROGRAM_NAME}
+    SCAN_DATA: {json.dumps(findings_list)}
 
-    INSTRUCTIONS:
-    1. VALIDATE STATUS CODES: 
-       - If a sensitive file (.env, .git, etc.) shows status 403 or 401, it is PROTECTED. Discard it.
-       - If it shows 200 OK, it is a VALID VULNERABILITY.
-    2. CHECK TAKEOVERS: Use the 'dns_cname' in the context. Only report if it's pointing to a vulnerable 3rd party.
-    3. FILTER NOISE: Discard 'Informational' or 'Low' severity findings that have no security impact.
-    4. REPORT: If you find a valid bug, write a professional report in English.
-    5. FORMAT: Return ONLY a raw JSON with keys: "title", "description", "impact".
-    6. IF NOTHING IS VALID: Simply return the word: NO_VALID_BUG
+    TASK:
+    1. ANALYZE: Review all findings. Discard false positives and low-impact noise.
+    2. CONSOLIDATE (ANTI-SPAM): If multiple subdomains or URLs have the SAME vulnerability, 
+       COMBINE them into ONE comprehensive report. List all affected URLs in that single report.
+    3. LABEL: If the bug is High/Critical (SQLi, Takeover, RCE, Secret Leak), 
+       start the title with [URGENT].
+    4. POC: Provide clear technical steps to reproduce.
+    
+    FORMAT: Return ONLY a raw JSON with keys: "title", "description", "impact". 
+    If nothing is valid, return: NO_VALID_BUG
     """
 
     try:
