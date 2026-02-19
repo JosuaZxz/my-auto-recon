@@ -1,9 +1,9 @@
-name: Automated Recon & AI Validation
+name: Stealth Automated Recon (Unlimited)
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */1 * * *' # Jalan tiap 1 jam sekali (GRATIS/UNLIMITED)
+  workflow_dispatch: # Tombol manual
 
 jobs:
   recon-job:
@@ -11,8 +11,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -44,20 +42,20 @@ jobs:
         run: |
           for target_file in targets/*.txt; do
             program_name=$(basename "$target_file" .txt)
-            echo "--- Processing: $program_name ---"
+            echo "--- Hunting on: $program_name ---"
             
             mkdir -p "data/$program_name"
             
-            # 1. Subdomain Discovery
+            # 1. Cari Subdomain
             subfinder -dL "$target_file" -all -o "data/$program_name/subdomains.txt"
             
-            # 2. Live Host Discovery
+            # 2. Cek yang Hidup
             cat "data/$program_name/subdomains.txt" | httpx -silent -o "data/$program_name/active_hosts.txt"
             
-            # 3. Nuclei Scan (FIXED: Menggunakan -tags agar tidak error)
+            # 3. Scan Celah (Nuclei)
             nuclei -l "data/$program_name/active_hosts.txt" -tags exposures,misconfiguration,vulnerabilities -jsonl -o "data/$program_name/nuclei_results.json"
             
-            # 4. AI Validation & HackerOne Draft
+            # 4. Kirim ke AI & HackerOne Draft
             PROGRAM_NAME=$program_name python scripts/validate.py
             
             # 5. Notifikasi Telegram
