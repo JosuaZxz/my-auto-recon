@@ -2,8 +2,8 @@ name: Automated Recon & AI Validation
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # Berjalan otomatis setiap 6 jam
-  workflow_dispatch: # Tombol manual di tab Actions
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   recon-job:
@@ -40,47 +40,28 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NOTIFY_CONF: ${{ secrets.NOTIFY_CONFIG }}
         run: |
-          # Loop setiap file .txt di dalam folder targets/
           for target_file in targets/*.txt; do
-            # Ambil nama program dari nama file (misal paypal.txt jadi paypal)
             program_name=$(basename "$target_file" .txt)
-            echo "-----------------------------------------------"
-            echo "PROCESSING PROGRAM: $program_name"
-            echo "-----------------------------------------------"
+            echo "--- Processing: $program_name ---"
             
-            # Buat folder penyimpanan hasil per program
             mkdir -p "data/$program_name"
             
-            # 1. Subdomain Enumeration
             subfinder -dL "$target_file" -all -o "data/$program_name/subdomains.txt"
-            
-            # 2. Check Live Hosts (Hanya yang aktif)
             cat "data/$program_name/subdomains.txt" | httpx -silent -o "data/$program_name/active_hosts.txt"
-            
-            # 3. Nuclei Scan (Mencari celah keamanan)
             nuclei -l "data/$program_name/active_hosts.txt" -t exposures,misconfiguration,vulnerabilities -jsonl -o "data/$program_name/nuclei_results.json"
             
-            # 4. AI Validation (Memanggil script python untuk filter & laporan)
             PROGRAM_NAME=$program_name python scripts/validate.py
             
-            # Persiapkan file config notify untuk pengiriman pesan
             echo "$NOTIFY_CONF" > notify-config.yaml
 
-            # 5. Kirim Notifikasi Grup A (P1 & P2 - Critical/High)
             if [ -f "data/$program_name/high_findings.txt" ]; then
-              echo "Sending High Severity Alerts for $program_name..."
-              # Menambahkan header nama program (huruf kapital) sebelum isi laporan
               (echo -e "🎯 TARGET: ${program_name^^}\n"; cat "data/$program_name/high_findings.txt") | notify -config notify-config.yaml -id critical_alerts
             fi
 
-            # 6. Kirim Notifikasi Grup B (P3 & P4 - Medium/Low)
             if [ -f "data/$program_name/low_findings.txt" ]; then
-              echo "Sending Low Severity Alerts for $program_name..."
-              # Menambahkan header nama program (huruf kapital) sebelum isi laporan
               (echo -e "🎯 TARGET: ${program_name^^}\n"; cat "data/$program_name/low_findings.txt") | notify -config notify-config.yaml -id general_alerts
             fi
             
-            # Hapus config sementara sebelum ganti ke program berikutnya
             rm -f notify-config.yaml
           done
 
@@ -88,9 +69,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Bot"
-          # Tambahkan semua file baru di folder data ke Git
           git add data/*
-          # Simpan perubahan, jika tidak ada perubahan jangan error
           git commit -m "Auto-update Recon Data: $(date)" || echo "No changes to commit"
-          # Push balik ke repository private kamu
           git push
