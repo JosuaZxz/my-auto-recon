@@ -2,7 +2,7 @@ name: Stealth Automated Recon (Unlimited)
 
 on:
   schedule:
-    - cron: '0 */1 * * *' # Jalan tiap 1 jam sekali (Gratis/Unlimited karena Public)
+    - cron: '0 */1 * * *' # Jalan tiap 1 jam sekali (GRATIS/UNLIMITED)
   workflow_dispatch:
 
 jobs:
@@ -44,21 +44,26 @@ jobs:
             program_name=$(basename "$target_file" .txt)
             echo "--- Hunting on: $program_name ---"
             
+            # Buat folder sementara di Runner
             mkdir -p "data/$program_name"
             
             # 1. Cari Subdomain
             subfinder -dL "$target_file" -all -o "data/$program_name/subdomains.txt"
             
-            # 2. Cek yang Hidup & Catat IP Address (-ip)
-            cat "data/$program_name/subdomains.txt" | httpx -silent -ip -o "data/$program_name/active_hosts.txt"
+            # 2. Cek Hidup, Catat IP, dan Nyamar jadi Chrome (-H)
+            cat "data/$program_name/subdomains.txt" | httpx -silent -ip -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -o "data/$program_name/active_hosts.txt"
             
-            # 3. Scan Celah Keamanan (Nuclei)
-            nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve,tech -jsonl -o "data/$program_name/nuclei_results.json"
+            # 3. Nuclei Scan: Nyamar (-H) + Batas Kecepatan (-rl 100) + Tags Komplit
+            nuclei -l "data/$program_name/active_hosts.txt" \
+              -tags exposure,misconfig,takeover,cve,tech \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              -rl 100 -bs 10 -c 10 \
+              -jsonl -o "data/$program_name/nuclei_results.json"
             
-            # 4. Kirim ke AI & HackerOne Draft
+            # 4. Panggil AI buat Triage & kirim draf H1
             PROGRAM_NAME=$program_name python scripts/validate.py
             
-            # 5. Notifikasi Telegram
+            # 5. Kirim Notif Telegram
             echo "$NOTIFY_CONF" > notify-config.yaml
             if [ -f "data/$program_name/high_findings.txt" ]; then
               (echo -e "🎯 TARGET: ${program_name^^}\n"; cat "data/$program_name/high_findings.txt") | notify -config notify-config.yaml -id critical_alerts
