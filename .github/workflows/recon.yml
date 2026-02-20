@@ -62,7 +62,7 @@ jobs:
           
             # 3. HTTPX (Max 20m - Output dibuang ke /dev/null)
             echo "[+] 🌐 Step 2: HTTPX Live Check (Max 20m)..."
-            timeout 20m httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || echo "   ⚠️ HTTPX reached timeout, moving on..."
+            httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || echo "   ⚠️ HTTPX reached timeout, moving on..."
             
             count_live=$(wc -l < "data/$program_name/active_hosts.txt" || echo 0)
             echo "   ✅ Live Hosts: $count_live"
