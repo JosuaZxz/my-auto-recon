@@ -73,9 +73,9 @@ jobs:
                 echo "[+] ☢️ Step 3: Nuclei Deep Scan (Max 3h)..."
                 # -stats -si 60: Munculin progress tiap 1 menit
                 # -silent: Gak usah menuhin layar log
-                timeout 3h nuclei -l "data/$program_name/active_hosts.txt" \
+                nuclei -l "data/$program_name/active_hosts.txt" \
                   -tags exposure,misconfig,takeover,cve,tech \
-                  -c 50 -retries 0 \
+                  -c 50 -timeout 3 -retries 0 \
                   -stats -si 60 \
                   -silent \
                   -jsonl -o "data/$program_name/nuclei_results.json" || echo "   ⚠️ Nuclei reached timeout, finaling report..."
