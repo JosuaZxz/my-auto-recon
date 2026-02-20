@@ -1,8 +1,8 @@
-name: Sniper Recon (Every 20 Mins - Anti Stuck)
+name: Predator Sniper Recon (Unlimited & Anti-Stuck)
 
 on:
   schedule:
-    - cron: '*/20 * * * *' # Jalan tiap 20 menit (Cukup agresif & stabil)
+    - cron: '*/5 * * * *' # Frekuensi maksimal: Cek target tiap 5 menit
   workflow_dispatch:
 
 jobs:
@@ -17,7 +17,7 @@ jobs:
         with:
           go-version: '>=1.20'
 
-      - name: Install Tools
+      - name: Install ProjectDiscovery Tools
         run: |
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
@@ -33,73 +33,66 @@ jobs:
       - name: Install Python Dependencies
         run: pip install google-generativeai requests
 
-      - name: Run Sniper Recon (Silent & Anti-Stuck)
+      - name: Run Predator Recon
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           H1_USERNAME: ${{ secrets.H1_USERNAME }}
           H1_API_KEY: ${{ secrets.H1_API_KEY }}
           NOTIFY_CONF: ${{ secrets.NOTIFY_CONFIG }}
         run: |
-          # 1. PILIH 1 TARGET ACAK
+          # 1. PILIH 1 TARGET SECARA ACAK
           target_file=$(ls targets/*.txt | shuf | head -n 1)
           program_name=$(basename "$target_file" .txt)
           
           echo "=================================================="
-          echo "🎯 TARGET: $program_name"
-          echo "⏰ START: $(date)"
+          echo "🎯 TARGETING: $program_name"
+          echo "⏰ START TIME: $(date)"
           echo "=================================================="
           
           mkdir -p "data/$program_name"
           
-          # 2. SUBFINDER (Max 15m - Output dibuang ke /dev/null biar log bersih)
-          echo "[+] 🔍 Step 1: Subfinder (Max 15m)..."
-          subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1 || echo "   ⚠️ Subfinder reached timeout, moving on..."
+          # 2. SUBFINDER (Max 20m - Silent)
+          echo "[+] Step 1: Gathering Subdomains (Max 20m)..."
+          timeout 20m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1 || echo "⚠️ Subfinder Timeout"
           
           count_sub=$(wc -l < "data/$program_name/subdomains.txt" || echo 0)
           echo "   ✅ Found: $count_sub subdomains"
           
           if [ "$count_sub" -gt 0 ]; then
           
-            # 3. HTTPX (Max 20m - Output dibuang ke /dev/null)
-            echo "[+] 🌐 Step 2: HTTPX Live Check (Max 20m)..."
-            httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || echo "   ⚠️ HTTPX reached timeout, moving on..."
+            # 3. HTTPX (Max 30m - Silent)
+            echo "[+] Step 2: Filtering Live Hosts (Max 30m)..."
+            timeout 30m httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || echo "⚠️ HTTPX Timeout"
             
             count_live=$(wc -l < "data/$program_name/active_hosts.txt" || echo 0)
-            echo "   ✅ Live Hosts: $count_live"
+            echo "   ✅ Live Targets: $count_live"
             
             if [ "$count_live" -gt 0 ]; then
             
-                # 4. NUCLEI (Max 3 Jam - Tetap pakai Stats biar kamu tau dia jalan)
-                echo "[+] ☢️ Step 3: Nuclei Deep Scan (Max 3h)..."
-                # -stats -si 60: Munculin progress tiap 1 menit
-                # -silent: Gak usah menuhin layar log
-                nuclei -l "data/$program_name/active_hosts.txt" \
+                # 4. NUCLEI (Max 2 Jam - Silent with Progress Bar)
+                echo "[+] Step 3: Deep Scanning 6,500+ Templates (Max 2h)..."
+                timeout 2h nuclei -l "data/$program_name/active_hosts.txt" \
                   -tags exposure,misconfig,takeover,cve,tech \
                   -c 50 -timeout 3 -retries 0 \
                   -stats -si 60 \
                   -silent \
-                  -jsonl -o "data/$program_name/nuclei_results.json" || echo "   ⚠️ Nuclei reached timeout, finaling report..."
+                  -jsonl -o "data/$program_name/nuclei_results.json" || echo "⚠️ Nuclei Timeout"
                 
-                # 5. AI VALIDATION
-                echo "[+] 🧠 Step 4: AI Brain Processing..."
+                # 5. AI TRIAGE & DRAFTING
+                echo "[+] Step 4: AI Validation & H1 Drafting..."
                 PROGRAM_NAME=$program_name python scripts/validate.py
                 
-                # 6. NOTIFIKASI TELEGRAM
+                # 6. TELEGRAM NOTIFICATION
                 echo "$NOTIFY_CONF" > notify-config.yaml
-                if [ -f "data/$program_name/high_findings.txt" ]; then
+                if [[ -f "data/$program_name/high_findings.txt" ]]; then
                   (echo -e "🎯 TARGET: ${program_name^^}\n"; cat "data/$program_name/high_findings.txt") | notify -config notify-config.yaml -id critical_alerts
                 else
-                  echo "💤 Tidak ada bug valid yang ditemukan pada putaran ini."
+                  echo "💤 Putaran ini bersih. Tidak ada bug valid."
                 fi
                 rm -f notify-config.yaml
             
-            else
-                echo "   ❌ 0 hosts alive."
             fi
-          else
-            echo "   ❌ 0 subdomains found."
           fi
-          
           echo "=================================================="
-          echo "🏁 MISSION COMPLETE: $(date)"
+          echo "🏁 MISSION FINISHED: $(date)"
           echo "=================================================="
