@@ -1,8 +1,8 @@
-name: Stealth Automated Recon (Unlimited)
+name: Automated Recon (Pure Power)
 
 on:
   schedule:
-    - cron: '0 */1 * * *' # Jalan tiap 1 jam sekali (GRATIS/UNLIMITED)
+    - cron: '0 */1 * * *' # Jalan tiap 1 jam
   workflow_dispatch:
 
 jobs:
@@ -42,34 +42,34 @@ jobs:
         run: |
           for target_file in targets/*.txt; do
             program_name=$(basename "$target_file" .txt)
-            echo "--- Hunting on: $program_name ---"
+            echo "-----------------------------------------------"
+            echo "🔥 HUNTING STARTED: $program_name"
+            echo "-----------------------------------------------"
             
-            # Buat folder sementara di Runner
             mkdir -p "data/$program_name"
             
-            # 1. Cari Subdomain
+            # 1. SUBFINDER (Mode: Sedot Semua)
+            # -all: Ambil dari semua sumber
+            # Gak pake timeout, biar dia selesaiin tugasnya mau berapa ribu pun.
             subfinder -dL "$target_file" -all -o "data/$program_name/subdomains.txt"
             
-            # 2. Cek Hidup, Catat IP, dan Nyamar jadi Chrome (-H)
-            cat "data/$program_name/subdomains.txt" | httpx -silent -ip -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -o "data/$program_name/active_hosts.txt"
+            # 2. HTTPX (Mode: Cek Nyawa)
+            # Gak pake User-Agent Chrome biar koneksi lebih stabil/cepat default.
+            cat "data/$program_name/subdomains.txt" | httpx -silent -ip -o "data/$program_name/active_hosts.txt"
             
-            # 3. Nuclei Scan: Nyamar (-H) + Batas Kecepatan (-rl 100) + Tags Komplit
-            nuclei -l "data/$program_name/active_hosts.txt" \
-              -tags exposure,misconfig,takeover,cve,tech \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-              -rl 100 -bs 10 -c 10 \
-              -jsonl -o "data/$program_name/nuclei_results.json"
+            # 3. NUCLEI (Mode: Ganas)
+            # Tags lengkap: exposure, misconfig, takeover, cve, tech
+            # HAPUS RATE LIMIT (-rl). Biarkan dia lari secepat koneksi GitHub.
+            nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve,tech -jsonl -o "data/$program_name/nuclei_results.json"
             
-            # 4. Panggil AI buat Triage & kirim draf H1
+            # 4. VALIDASI AI (Pake script Python kamu yang sekarang)
             PROGRAM_NAME=$program_name python scripts/validate.py
             
-            # 5. Kirim Notif Telegram
+            # 5. NOTIFIKASI TELEGRAM
             echo "$NOTIFY_CONF" > notify-config.yaml
             if [ -f "data/$program_name/high_findings.txt" ]; then
               (echo -e "🎯 TARGET: ${program_name^^}\n"; cat "data/$program_name/high_findings.txt") | notify -config notify-config.yaml -id critical_alerts
             fi
-            if [ -f "data/$program_name/low_findings.txt" ]; then
-              (echo -e "🎯 TARGET: ${program_name^^}\n"; cat "data/$program_name/low_findings.txt") | notify -config notify-config.yaml -id general_alerts
-            fi
+            # Hapus config biar bersih buat target selanjutnya
             rm -f notify-config.yaml
           done
