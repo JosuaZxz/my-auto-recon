@@ -40,7 +40,7 @@ jobs:
           H1_API_KEY: ${{ secrets.H1_API_KEY }}
           NOTIFY_CONF: ${{ secrets.NOTIFY_CONFIG }}
         run: |
-          for target_file in targets/*.txt; do
+          for target_file in $(ls targets/*.txt | shuf); do
             program_name=$(basename "$target_file" .txt)
             echo "-----------------------------------------------"
             echo "🔥 HUNTING STARTED: $program_name"
