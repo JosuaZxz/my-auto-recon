@@ -51,10 +51,12 @@ jobs:
           
           mkdir -p "data/$program_name"
 
-          # --- PERINTAH TES (HAPUS SETELAH BERHASIL) ---
+          # --- PERINTAH TES (VERSI PAKSA) ---
             if [ "$program_name" == "00_test" ]; then
               echo '{"template-id":"fake-critical-bug","info":{"severity":"critical"},"matched-at":"http://testphp.vulnweb.com/admin","ip":"127.0.0.1"}' > "data/$program_name/nuclei_results.json"
-              echo "[!] TEST MODE: Injected fake bug for validation check."
+              echo "[!] TEST MODE: Forced AI validation..."
+              # Kita paksa panggil script AI-nya di sini
+              PROGRAM_NAME=$program_name python scripts/validate.py
             fi
           
           # 2. SUBFINDER (Max 20m - Silent)
