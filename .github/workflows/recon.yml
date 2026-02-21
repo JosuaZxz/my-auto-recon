@@ -17,7 +17,7 @@ jobs:
         with:
           go-version: '>=1.20'
 
-      - name: Install ProjectDiscovery Tools
+      - name: Install Tools
         run: |
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
@@ -38,89 +38,49 @@ jobs:
           H1_USERNAME: ${{ secrets.H1_USERNAME }}
           H1_API_KEY: ${{ secrets.H1_API_KEY }}
           TG_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # --- 3 JALUR TELEGRAM ---
+          TG_CRIT: ${{ secrets.TELEGRAM_CRITICAL_ID }}
+          TG_GEN: ${{ secrets.TELEGRAM_GENERAL_ID }}
+          TG_DATA: ${{ secrets.TELEGRAM_DATA_ID }}
         run: |
-          # --- 1. PILIH TARGET (TEST MODE) ---
-          target_file="targets/00_test.txt"
-          program_name="00_test"
+          # 1. PILIH TARGET (MODE ASLI ACAK)
+          target_file=$(ls targets/*.txt | shuf | head -n 1)
+          program_name=$(basename "$target_file" .txt)
           
-          echo "=================================================="
-          echo "🎯 TARGETING: $program_name"
-          echo "=================================================="
-          
+          echo "🎯 TARGET: $program_name"
           mkdir -p "data/$program_name"
-
-          # --- 2. LOGIKA MODE TES ---
-          if [ "$program_name" == "00_test" ]; then
-            echo "[!] TEST MODE: Injecting fake bug..."
-            echo '{"template-id":"fake-critical-bug","info":{"severity":"critical"},"matched-at":"http://testphp.vulnweb.com/admin","ip":"127.0.0.1"}' > "data/$program_name/nuclei_results.json"
-            
-            echo "[!] Running AI Validation..."
-            PROGRAM_NAME=$program_name python scripts/validate.py
-            
-            # KIRIM NOTIFIKASI (FIXED: Tanpa Markdown biar gak error)
-            if [ -f "data/$program_name/high_findings.txt" ]; then
-              echo "[!] Sending Telegram Alert..."
-              MSG_CONTENT=$(cat data/$program_name/high_findings.txt)
-              
-              curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
-                -d "chat_id=$TG_CHAT" \
-                -d "text=$MSG_CONTENT"
-            fi
-            
-            # Backup ZIP (FIXED: Pake -F biar URL gak rusak kena spasi)
-            zip -j "${program_name}_data.zip" data/$program_name/*
-            
-            curl -v -F chat_id="$TG_CHAT" \
-                 -F document=@"${program_name}_data.zip" \
-                 -F caption="📦 DATABASE TEST: $program_name" \
-                 "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-            
-            rm -f "${program_name}_data.zip"
-            echo "✅ Test completed."
           
-          else
-            # --- 3. LOGIKA BERBURU ASLI ---
-            echo "[+] Step 1: Subfinder (Max 20m)..."
-            timeout 20m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1
+          # 2. SCANNING
+          timeout 20m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1
+          
+          if [ -s "data/$program_name/subdomains.txt" ]; then
+            timeout 30m httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1
             
-            count_sub=$(wc -l < "data/$program_name/subdomains.txt" || echo 0)
-            
-            if [ "$count_sub" -gt 0 ]; then
-              echo "[+] Step 2: HTTPX Live Check (Max 30m)..."
-              timeout 30m httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1
-              
-              count_live=$(wc -l < "data/$program_name/active_hosts.txt" || echo 0)
-              
-              if [ "$count_live" -gt 0 ]; then
-                echo "[+] Step 3: Nuclei Deep Scan (Max 2h)..."
+            if [ -s "data/$program_name/active_hosts.txt" ]; then
                 timeout 2h nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve,tech -c 50 -timeout 3 -retries 0 -stats -si 60 -silent -jsonl -o "data/$program_name/nuclei_results.json"
                 
-                echo "[+] Step 4: AI Validation..."
+                # 3. AI VALIDATION
                 PROGRAM_NAME=$program_name python scripts/validate.py
                 
-                # KIRIM NOTIFIKASI (FIXED)
+                # --- [SISTEM NOTIFIKASI TERPISAH] ---
+                
+                # JALUR 1: CRITICAL/HIGH (Grup A - Berisik)
                 if [ -f "data/$program_name/high_findings.txt" ]; then
-                  MSG_CONTENT=$(cat data/$program_name/high_findings.txt)
-                  curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
-                    -d "chat_id=$TG_CHAT" \
-                    -d "text=$MSG_CONTENT"
+                  MSG=$(cat data/$program_name/high_findings.txt)
+                  curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_CRIT" -d "text=$MSG"
                 fi
 
-                # Backup ZIP (FIXED)
+                # JALUR 2: MEDIUM/LOW (Grup B - Santai)
+                if [ -f "data/$program_name/low_findings.txt" ]; then
+                  MSG=$(cat data/$program_name/low_findings.txt)
+                  curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_GEN" -d "text=$MSG"
+                fi
+
+                # JALUR 3: DATA BACKUP (Grup C - Gudang)
                 zip_name="${program_name}_data.zip"
                 zip -j "$zip_name" data/$program_name/*
-                
-                curl -v -F chat_id="$TG_CHAT" \
-                     -F document=@"$zip_name" \
-                     -F caption="📦 DATABASE: $program_name" \
-                     "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-                     
+                curl -F chat_id="$TG_DATA" -F document=@"$zip_name" -F caption="📦 DB: ${program_name^^}" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
                 rm -f "$zip_name"
-              fi
             fi
           fi
-
-          echo "=================================================="
-          echo "🏁 MISSION FINISHED: $(date)"
-          echo "=================================================="
+          echo "🏁 FINISHED"
