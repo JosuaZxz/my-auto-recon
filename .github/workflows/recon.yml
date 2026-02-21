@@ -36,11 +36,11 @@ jobs:
           python-version: '3.9'
 
       - name: Install Python Dependencies
-        run: pip install -U google-generativeai requests
+        run: pip install requests
         
       - name: Run Predator Recon
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           H1_USERNAME: ${{ secrets.H1_USERNAME }}
           H1_API_KEY: ${{ secrets.H1_API_KEY }}
           NOTIFY_CONF: ${{ secrets.NOTIFY_CONFIG }}
