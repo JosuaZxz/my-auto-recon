@@ -50,6 +50,12 @@ jobs:
           echo "=================================================="
           
           mkdir -p "data/$program_name"
+
+          # --- PERINTAH TES (HAPUS SETELAH BERHASIL) ---
+            if [ "$program_name" == "00_test" ]; then
+              echo '{"template-id":"fake-critical-bug","info":{"severity":"critical"},"matched-at":"http://testphp.vulnweb.com/admin","ip":"127.0.0.1"}' > "data/$program_name/nuclei_results.json"
+              echo "[!] TEST MODE: Injected fake bug for validation check."
+            fi
           
           # 2. SUBFINDER (Max 20m - Silent)
           echo "[+] Step 1: Gathering Subdomains (Max 20m)..."
