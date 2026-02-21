@@ -48,7 +48,7 @@ jobs:
           EOF
 
           # --- 2. PILIH TARGET (RANDOM SNIPER MODE) ---
-          target_file=$(ls targets/*.txt | shuf | head -n 1)
+          target_file="targets/00_test.txt"
           program_name=$(basename "$target_file" .txt)
           
           echo "=================================================="
@@ -57,6 +57,29 @@ jobs:
           echo "=================================================="
           
           mkdir -p "data/$program_name"
+
+          # --- 3. INJEKSI BUG PALSU & PAKSA AI ---
+          echo '{"template-id":"fake-critical-bug","info":{"severity":"critical"},"matched-at":"http://testphp.vulnweb.com/admin","ip":"127.0.0.1"}' > "data/$program_name/nuclei_results.json"
+          
+          echo "[+] Step: Running AI Validation..."
+          PROGRAM_NAME=$program_name python scripts/validate.py
+          
+          # --- 4. KIRIM NOTIFIKASI TELEGRAM ---
+          if [ -f "data/$program_name/high_findings.txt" ]; then
+            echo "🚀 Sending notification to Telegram..."
+            cat "data/$program_name/high_findings.txt" | notify -config notify-config.yaml -id critical_alerts
+          fi
+
+          # --- 5. BACKUP DATABASE ZIP KE TELEGRAM ---
+          zip_name="${program_name}_data.zip"
+          zip -j "$zip_name" data/$program_name/*
+          curl -F document=@"$zip_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT&caption=📦 DATABASE TEST: ${program_name^^}"
+          
+          # Bersih-bersih
+          rm -f notify-config.yaml "$zip_name"
+          echo "=================================================="
+          echo "🏁 TEST MISSION FINISHED"
+          echo "=================================================="
           
           # 3. RECON & SCAN (Silent & Fast)
           echo "[+] Step 1: Subfinder (Max 20m)..."
