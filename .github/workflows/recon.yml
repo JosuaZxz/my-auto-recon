@@ -1,8 +1,8 @@
-name: Automation Recon (No-Stuck)
+name: Automation Recon (24/7)
 
 on:
   schedule:
-    - cron: '*/5 * * * *' 
+    - cron: '*/5 * * * *' # Nembak tiap 10 menit (Unlimited)
   workflow_dispatch:
 
 jobs:
@@ -42,53 +42,66 @@ jobs:
           TG_GEN: ${{ secrets.TELEGRAM_GENERAL_ID }}
           TG_DATA: ${{ secrets.TELEGRAM_DATA_ID }}
         run: |
-          # --- 1. TARGET (PAKAI HACKERONE UNTUK TES KONEKSI ASLI) ---
-          target_file="targets/hackerone.txt"
-          program_name="hackerone"
-          
-          # target_file=$(ls targets/*.txt | shuf | head -n 1)
-          # program_name=$(basename "$target_file" .txt)
+          # --- 1. CONFIG NOTIFY (MENTOK KIRI) ---
+          cat <<EOF > notify-config.yaml
+          telegram:
+            - id: "p1_p2_alerts"
+              telegram_apikey: "$TG_TOKEN"
+              telegram_chatid: "$TG_CRIT"
+              format: "{{data}}"
+          EOF
+
+          # --- 2. PILIH TARGET ACAK (SNIPER MODE) ---
+          target_file=$(ls targets/*.txt | shuf | head -n 1)
+          program_name=$(basename "$target_file" .txt)
           
           echo "=================================================="
           echo "🎯 TARGETING: $program_name"
+          echo "⏰ START TIME: $(date)"
           echo "=================================================="
           
           mkdir -p "data/$program_name"
 
-          # --- 2. LOGIKA TES KHUSUS (SUNTIK 2 BUG: HIGH & LOW) ---
-          if [ "$program_name" == "hackerone" ]; then
-            echo "[!] TEST MODE: Injecting 2 Bugs (High & Low) for API test..."
-            # Kita suntik 2 baris: 1 Critical, 1 Medium
-            echo '{"template-id":"fake-critical","info":{"severity":"critical"},"matched-at":"https://hackerone.com/critical","ip":"1.1.1.1"}' > "data/$program_name/nuclei_results.json"
-            echo '{"template-id":"fake-medium","info":{"severity":"medium"},"matched-at":"https://hackerone.com/medium","ip":"2.2.2.2"}' >> "data/$program_name/nuclei_results.json"
+          # --- 3. PROSES RECON (SILENT & DISIPLIN) ---
+          echo "[+] Step 1: Subfinder Starting..."
+          timeout 20m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1
+          
+          if [ -s "data/$program_name/subdomains.txt" ]; then
+            echo "[+] Step 2: HTTPX Live Check..."
+            timeout 30m httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1
             
-            PROGRAM_NAME=$program_name python scripts/validate.py
-          else
-            # MODE HUNTING ASLI
-            timeout 20m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1
-            if [ -s "data/$program_name/subdomains.txt" ]; then
-              timeout 30m httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1
-              if [ -s "data/$program_name/active_hosts.txt" ]; then
+            if [ -s "data/$program_name/active_hosts.txt" ]; then
+                echo "[+] Step 3: Nuclei Deep Scan (6500+ Templates)..."
                 timeout 2h nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve,tech -c 50 -timeout 3 -retries 0 -stats -si 60 -silent -jsonl -o "data/$program_name/nuclei_results.json"
+                
+                # --- 4. AI VALIDATION (LLAMA 3.3) ---
+                echo "[+] Step 4: AI Analysis & H1 Drafting..."
                 PROGRAM_NAME=$program_name python scripts/validate.py
-              fi
+                
+                # --- 5. NOTIFIKASI TELEGRAM BERDASARKAN SEVERITY ---
+                
+                # JALUR P1/P2 (Grup A - Berisik)
+                if [ -f "data/$program_name/high_findings.txt" ]; then
+                  echo "[!] Sending P1/P2 Alert to Group A..."
+                  cat "data/$program_name/high_findings.txt" | notify -config notify-config.yaml -id p1_p2_alerts
+                fi
+
+                # JALUR P3/P4 (Grup B - Santai)
+                if [ -f "data/$program_name/low_findings.txt" ]; then
+                  echo "[!] Sending P3/P4 Alert to Group B..."
+                  MSG=$(cat "data/$program_name/low_findings.txt")
+                  curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_GEN" -d "text=$MSG"
+                fi
+
+                # JALUR DATABASE ZIP (Grup C)
+                zip_name="${program_name}_data.zip"
+                zip -j "$zip_name" data/$program_name/*
+                curl -v -F chat_id="$TG_DATA" -F document=@"$zip_name" -F caption="📦 DATABASE: $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
+                rm -f "$zip_name"
             fi
           fi
-
-          # --- 3. PENGIRIMAN NOTIFIKASI (PAKAI CURL AGAR PASTI JALAN) ---
-          if [ -f "data/$program_name/high_findings.txt" ]; then
-            echo "[!] Sending CRITICAL Alert to Group A..."
-            MSG=$(cat data/$program_name/high_findings.txt)
-            curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_CRIT" -d "text=$MSG"
-          fi
           
-          if [ -f "data/$program_name/low_findings.txt" ]; then
-            echo "[!] Sending GENERAL Alert to Group B..."
-            MSG=$(cat data/$program_name/low_findings.txt)
-            curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_GEN" -d "text=$MSG"
-          fi
-
-          # --- 4. BACKUP DATA (Grup C) ---
-          zip -j "${program_name}_data.zip" data/$program_name/*
-          curl -v -F chat_id="$TG_DATA" -F document=@"${program_name}_data.zip" -F caption="📦 DATABASE: $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-          rm -f "${program_name}_data.zip"
+          rm -f notify-config.yaml
+          echo "=================================================="
+          echo "🏁 MISSION FINISHED: $(date)"
+          echo "=================================================="
