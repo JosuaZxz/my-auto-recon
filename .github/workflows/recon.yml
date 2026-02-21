@@ -65,7 +65,10 @@ jobs:
               echo "[!] TEST MODE: Running AI..."
               PROGRAM_NAME=$program_name python scripts/validate.py
               
-              echo "$NOTIFY_CONF" > notify-config.yaml
+              cat <<EOF > notify-config.yaml
+                        ${{ secrets.NOTIFY_CONFIG }}
+              EOF
+                
               if [ -f "data/$program_name/high_findings.txt" ]; then
                 cat "data/$program_name/high_findings.txt" | notify -config notify-config.yaml -id critical_alerts
               fi
@@ -102,7 +105,10 @@ jobs:
                 PROGRAM_NAME=$program_name python scripts/validate.py
                 
                 # 6. TELEGRAM NOTIFICATION
-                echo "$NOTIFY_CONF" > notify-config.yaml
+                cat <<EOF > notify-config.yaml
+                          ${{ secrets.NOTIFY_CONFIG }}
+                EOF
+                
                 if [[ -f "data/$program_name/high_findings.txt" ]]; then
                   (echo -e "🎯 TARGET: ${program_name^^}\n"; cat "data/$program_name/high_findings.txt") | notify -config notify-config.yaml -id critical_alerts
                 else
