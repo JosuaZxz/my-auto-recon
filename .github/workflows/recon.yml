@@ -2,7 +2,7 @@ name: Automation Recon (No-Stuck)
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # Cek tiap 30 menit (Aman buat kuota AI)
+    - cron: '*/5 * * * *' # Cek tiap 5 menit 
   workflow_dispatch:
 
 concurrency:
