@@ -58,28 +58,27 @@ jobs:
           
           mkdir -p "data/$program_name"
 
-          # --- 3. INJEKSI BUG PALSU & PAKSA AI ---
+          # 3. INJEKSI BUG PALSU
           echo '{"template-id":"fake-critical-bug","info":{"severity":"critical"},"matched-at":"http://testphp.vulnweb.com/admin","ip":"127.0.0.1"}' > "data/$program_name/nuclei_results.json"
           
-          echo "[+] Step: Running AI Validation..."
+          # 4. PANGGIL AI
+          echo "[+] Running AI Validation..."
           PROGRAM_NAME=$program_name python scripts/validate.py
           
-          # --- 4. KIRIM NOTIFIKASI TELEGRAM ---
+          # 5. KIRIM NOTIFIKASI BUG (Sirine)
           if [ -f "data/$program_name/high_findings.txt" ]; then
-            echo "🚀 Sending notification to Telegram..."
             cat "data/$program_name/high_findings.txt" | notify -config notify-config.yaml -id critical_alerts
           fi
 
-          # --- 5. BACKUP DATABASE ZIP KE TELEGRAM ---
+          # 6. KIRIM ZIP DATABASE (Pake format URL yang lebih aman)
           zip_name="${program_name}_data.zip"
           zip -j "$zip_name" data/$program_name/*
-          curl -F document=@"$zip_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT&caption=📦 DATABASE TEST: ${program_name^^}"
           
-          # Bersih-bersih
+          echo "[+] Sending Backup to Telegram..."
+          # Kita pake tanda kutip ganda di variabel biar aman
+          curl -v -F document=@"$zip_name" "https://api.telegram.org/bot${TG_TOKEN}/sendDocument?chat_id=${TG_CHAT}&caption=📦_DATABASE_${program_name^^}"
+          
           rm -f notify-config.yaml "$zip_name"
-          echo "=================================================="
-          echo "🏁 TEST MISSION FINISHED"
-          echo "=================================================="
           
           # 3. RECON & SCAN (Silent & Fast)
           echo "[+] Step 1: Subfinder (Max 20m)..."
