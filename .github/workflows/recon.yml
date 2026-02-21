@@ -22,7 +22,6 @@ jobs:
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          # Kita HAPUS notify karena rewel
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
       - name: Set up Python
@@ -42,7 +41,6 @@ jobs:
           TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           # --- 1. PILIH TARGET (TEST MODE) ---
-          # Nanti kembalikan baris ini ke mode shuf kalau tes sudah sukses
           target_file="targets/00_test.txt"
           program_name="00_test"
           
@@ -60,21 +58,24 @@ jobs:
             echo "[!] Running AI Validation..."
             PROGRAM_NAME=$program_name python scripts/validate.py
             
-            # KIRIM NOTIFIKASI PAKAI CURL (ANTI-ERROR)
+            # KIRIM NOTIFIKASI (FIXED: Tanpa Markdown biar gak error)
             if [ -f "data/$program_name/high_findings.txt" ]; then
-              echo "[!] Sending Telegram Alert via CURL..."
-              # Baca isi file pesan
+              echo "[!] Sending Telegram Alert..."
               MSG_CONTENT=$(cat data/$program_name/high_findings.txt)
-              # Kirim langsung ke API Telegram (Gak butuh config file)
+              
               curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
                 -d "chat_id=$TG_CHAT" \
-                -d "text=$MSG_CONTENT" \
-                -d "parse_mode=Markdown"
+                -d "text=$MSG_CONTENT"
             fi
             
-            # Backup ZIP
+            # Backup ZIP (FIXED: Pake -F biar URL gak rusak kena spasi)
             zip -j "${program_name}_data.zip" data/$program_name/*
-            curl -F document=@"${program_name}_data.zip" "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT&caption=📦 DATABASE TEST: ${program_name^^}"
+            
+            curl -v -F chat_id="$TG_CHAT" \
+                 -F document=@"${program_name}_data.zip" \
+                 -F caption="📦 DATABASE TEST: $program_name" \
+                 "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
+            
             rm -f "${program_name}_data.zip"
             echo "✅ Test completed."
           
@@ -98,19 +99,23 @@ jobs:
                 echo "[+] Step 4: AI Validation..."
                 PROGRAM_NAME=$program_name python scripts/validate.py
                 
-                # KIRIM NOTIFIKASI PAKAI CURL (ANTI-ERROR)
+                # KIRIM NOTIFIKASI (FIXED)
                 if [ -f "data/$program_name/high_findings.txt" ]; then
                   MSG_CONTENT=$(cat data/$program_name/high_findings.txt)
                   curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
                     -d "chat_id=$TG_CHAT" \
-                    -d "text=$MSG_CONTENT" \
-                    -d "parse_mode=Markdown"
+                    -d "text=$MSG_CONTENT"
                 fi
 
-                # Backup ZIP
+                # Backup ZIP (FIXED)
                 zip_name="${program_name}_data.zip"
                 zip -j "$zip_name" data/$program_name/*
-                curl -F document=@"$zip_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument?chat_id=$TG_CHAT&caption=📦 DATABASE: ${program_name^^}"
+                
+                curl -v -F chat_id="$TG_CHAT" \
+                     -F document=@"$zip_name" \
+                     -F caption="📦 DATABASE: $program_name" \
+                     "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
+                     
                 rm -f "$zip_name"
               fi
             fi
