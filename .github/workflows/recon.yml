@@ -41,7 +41,7 @@ jobs:
           NOTIFY_CONF: ${{ secrets.NOTIFY_CONFIG }}
         run: |
           # 1. PILIH 1 TARGET SECARA ACAK
-          target_file=$(ls targets/*.txt | shuf | head -n 1)
+          target_file="targets/00_test.txt"
           program_name=$(basename "$target_file" .txt)
           
           echo "=================================================="
