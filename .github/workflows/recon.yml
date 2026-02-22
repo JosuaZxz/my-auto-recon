@@ -2,7 +2,7 @@ name: Automation Recon (24/7)
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # Nembak tiap 10 menit
+    - cron: '*/5 * * * *' # Nembak tiap 10 menit
   workflow_dispatch:
 
 jobs:
