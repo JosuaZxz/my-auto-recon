@@ -2,7 +2,7 @@ name: Automation Recon (24/7 Grandmaster)
 
 on:
   schedule:
-    - cron: '*/30 * * * *' 
+    - cron: '*/10 * * * *' # Jalan tiap 30 menit (Sangat Aman dari Ban)
   workflow_dispatch:
 
 jobs:
@@ -12,8 +12,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # --- [STATE MANAGEMENT: PERSISTENSI DUPLIKAT] ---
-      - name: Cache Seen URLs
+      # --- [MEMORI RAHASIA: ANTI-DUPLIKAT] ---
+      - name: Restore/Save Seen URLs
         uses: actions/cache@v3
         with:
           path: .seen_urls
@@ -33,11 +33,6 @@ jobs:
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
       - name: Install Python Dependencies
         run: pip install requests
 
@@ -51,46 +46,35 @@ jobs:
           TG_GEN: ${{ secrets.TELEGRAM_GENERAL_ID }}
           TG_DATA: ${{ secrets.TELEGRAM_DATA_ID }}
         run: |
+          # PILIH TARGET ACAK
+          touch .seen_urls
           target_file=$(ls targets/*.txt | shuf | head -n 1)
           program_name=$(basename "$target_file" .txt)
+          echo "🎯 TARGETING: $program_name"
           mkdir -p "data/$program_name"
-          touch .seen_urls # Pastikan file database ada
 
-          # 1. SUBFINDER (Max 30m)
+          # SCANNING
           timeout 30m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1 || true
+          timeout 45m httpx -l "data/$program_name/subdomains.txt" -silent -ip -td -mc 200,401,403 -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || true
+          timeout 3h nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve2023,cve2024,cve2025 -severity critical,high,medium -nt -rl 80 -c 15 -me 10 -silent -jsonl -o "data/$program_name/nuclei_results.json" || true
           
-          if [ -s "data/$program_name/subdomains.txt" ]; then
-            # 2. HTTPX (FILTER MC: 200,401,403,405)
-            timeout 45m httpx -l "data/$program_name/subdomains.txt" -silent -ip -td -mc 200,401,403,405 -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || true
-            
-            if [ -s "data/$program_name/active_hosts.txt" ]; then
-                # 3. NUCLEI (PRO MODE: -nt (New Templates) & -me (Max Errors))
-                timeout 3h nuclei -l "data/$program_name/active_hosts.txt" \
-                  -tags exposure,misconfig,takeover,cve2023,cve2024,cve2025 \
-                  -severity critical,high,medium \
-                  -nt -rl 80 -c 15 -me 10 -stats -si 60 -silent \
-                  -jsonl -o "data/$program_name/nuclei_results.json" || true
-                
-                # 4. AI VALIDATION
-                PROGRAM_NAME=$program_name python scripts/validate.py
-                
-                # 5. KIRIM NOTIFIKASI FILE .MD (LOOPING)
-                if [ -d "data/$program_name/alerts/high" ]; then
-                  for f in data/$program_name/alerts/high/*.md; do
-                    [ -e "$f" ] || continue
-                    curl -v -F chat_id="$TG_CRIT" -F document=@"$f" -F caption="🚨 [P1/P2 BUG] $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-                  done
-                fi
-                if [ -d "data/$program_name/alerts/low" ]; then
-                  for f in data/$program_name/alerts/low/*.md; do
-                    [ -e "$f" ] || continue
-                    curl -v -F chat_id="$TG_GEN" -F document=@"$f" -F caption="⚠️ [P3/P4 BUG] $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-                  done
-                fi
+          # AI ANALYSIS
+          PROGRAM_NAME=$program_name python scripts/validate.py
 
-                # 6. BACKUP DATABASE ZIP
-                zip_name="${program_name}_data.zip"
-                zip -j "$zip_name" data/$program_name/*.txt data/$program_name/*.json > /dev/null 2>&1 || true
-                curl -F chat_id="$TG_DATA" -F document=@"$zip_name" -F caption="📦 DB: $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-            fi
+          # KIRIM FILE LAPORAN KE TELEGRAM
+          if [ -d "data/$program_name/alerts/high" ]; then
+            for f in data/$program_name/alerts/high/*.md; do
+              [ -e "$f" ] || continue
+              curl -v -F chat_id="$TG_CRIT" -F document=@"$f" -F caption="🚨 [P1/P2 BUG] $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
+            done
           fi
+          if [ -d "data/$program_name/alerts/low" ]; then
+            for f in data/$program_name/alerts/low/*.md; do
+              [ -e "$f" ] || continue
+              curl -v -F chat_id="$TG_GEN" -F document=@"$f" -F caption="⚠️ [P3/P4 BUG] $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
+            done
+          fi
+
+          # BACKUP DATA ZIP
+          zip -j "${program_name}_data.zip" data/$program_name/*.txt data/$program_name/*.json > /dev/null 2>&1 || true
+          curl -F chat_id="$TG_DATA" -F document=@"${program_name}_data.zip" -F caption="📦 DATABASE: $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
