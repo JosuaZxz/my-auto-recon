@@ -1,8 +1,8 @@
-name: Automation Recon (24/7)
+name: Automation Recon (No-Stuck 24/7)
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # Jalan tiap 30 menit (Sangat Aman dari Ban)
+    - cron: '*/10 * * * *' # Nembak tiap 10 menit
   workflow_dispatch:
 
 jobs:
@@ -12,8 +12,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # --- [MEMORI RAHASIA: ANTI-DUPLIKAT] ---
-      - name: Restore/Save Seen URLs
+      # --- [PERSISTENSI DATABASE: ANTI-DUPLIKAT] ---
+      - name: Cache Seen URLs
         uses: actions/cache@v3
         with:
           path: .seen_urls
@@ -28,10 +28,16 @@ jobs:
 
       - name: Install Tools
         run: |
+          sudo apt-get update && sudo apt-get install dnsutils -y
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
       - name: Install Python Dependencies
         run: pip install requests
@@ -46,35 +52,55 @@ jobs:
           TG_GEN: ${{ secrets.TELEGRAM_GENERAL_ID }}
           TG_DATA: ${{ secrets.TELEGRAM_DATA_ID }}
         run: |
-          # PILIH TARGET ACAK
-          touch .seen_urls
+          # 1. KONFIGURASI NOTIFIKASI
+          echo "telegram:" > notify-config.yaml
+          echo "  - id: \"p1_p2_alerts\"" >> notify-config.yaml
+          echo "    telegram_apikey: \"$TG_TOKEN\"" >> notify-config.yaml
+          echo "    telegram_chatid: \"$TG_CRIT\"" >> notify-config.yaml
+          echo "    format: \"{{data}}\"" >> notify-config.yaml
+
+          # 2. TARGET SELECTION (RANDOM SNIPER)
           target_file=$(ls targets/*.txt | shuf | head -n 1)
           program_name=$(basename "$target_file" .txt)
           echo "🎯 TARGETING: $program_name"
           mkdir -p "data/$program_name"
+          touch .seen_urls
 
-          # SCANNING
-          timeout 30m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1 || true
-          timeout 45m httpx -l "data/$program_name/subdomains.txt" -silent -ip -td -mc 200,401,403 -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || true
-          timeout 3h nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve2023,cve2024,cve2025 -severity critical,high,medium -nt -rl 80 -c 15 -me 10 -silent -jsonl -o "data/$program_name/nuclei_results.json" || true
+          # 3. SCANNING (PRO FILTER)
+          timeout 20m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1 || true
           
-          # AI ANALYSIS
-          PROGRAM_NAME=$program_name python scripts/validate.py
+          if [ -s "data/$program_name/subdomains.txt" ]; then
+            # Hanya scan host yang responnya 200, 401, 403, atau 405 (Mc-Filter)
+            timeout 30m httpx -l "data/$program_name/subdomains.txt" -silent -ip -td -mc 200,401,403,405 -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || true
+            
+            if [ -s "data/$program_name/active_hosts.txt" ]; then
+                # -nt (New Templates) + -me 10 (WAF Detection)
+                timeout 2h nuclei -l "data/$program_name/active_hosts.txt" -tags exposure,misconfig,takeover,cve2023,cve2024,cve2025 -severity critical,high,medium -nt -rl 80 -c 15 -me 10 -stats -si 60 -silent -jsonl -o "data/$program_name/nuclei_results.json" || true
+                
+                # 4. AI ANALYSIS (Llama 3.3)
+                PROGRAM_NAME=$program_name python scripts/validate.py
 
-          # KIRIM FILE LAPORAN KE TELEGRAM
-          if [ -d "data/$program_name/alerts/high" ]; then
-            for f in data/$program_name/alerts/high/*.md; do
-              [ -e "$f" ] || continue
-              curl -v -F chat_id="$TG_CRIT" -F document=@"$f" -F caption="🚨 [P1/P2 BUG] $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-            done
-          fi
-          if [ -d "data/$program_name/alerts/low" ]; then
-            for f in data/$program_name/alerts/low/*.md; do
-              [ -e "$f" ] || continue
-              curl -v -F chat_id="$TG_GEN" -F document=@"$f" -F caption="⚠️ [P3/P4 BUG] $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
-            done
-          fi
+                # 5. NOTIFIKASI TELEGRAM (.md files)
+                if [ -d "data/$program_name/alerts/high" ]; then
+                  for f in data/$program_name/alerts/high/*.md; do
+                    [ -e "$f" ] || continue
+                    cat "$f" | notify -config notify-config.yaml -id p1_p2_alerts
+                  done
+                fi
+                if [ -d "data/$program_name/alerts/low" ]; then
+                  for f in data/$program_name/alerts/low/*.md; do
+                    [ -e "$f" ] || continue
+                    MSG_LOW=$(cat "$f")
+                    curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_GEN" -d "text=$MSG_LOW" > /dev/null 2>&1
+                  done
+                fi
 
-          # BACKUP DATA ZIP
-          zip -j "${program_name}_data.zip" data/$program_name/*.txt data/$program_name/*.json > /dev/null 2>&1 || true
-          curl -F chat_id="$TG_DATA" -F document=@"${program_name}_data.zip" -F caption="📦 DATABASE: $program_name" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
+                # 6. BACKUP DATABASE ZIP & SEEN_DB
+                if [ -s "data/$program_name/nuclei_results.json" ]; then
+                   cat "data/$program_name/nuclei_results.json" | grep -oP '"matched-at":"\K[^"]+' > "data/$program_name/HITS_LOG.txt"
+                fi
+                zip_name="${program_name}_data.zip"
+                zip -j "$zip_name" data/$program_name/*.txt data/$program_name/*.json .seen_urls > /dev/null 2>&1 || true
+                curl -F chat_id="$TG_DATA" -F document=@"$zip_name" -F caption="📦 DB: $program_name (with .seen_urls)" "https://api.telegram.org/bot$TG_TOKEN/sendDocument"
+            fi
+          fi
