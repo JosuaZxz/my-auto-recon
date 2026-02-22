@@ -2,7 +2,7 @@ name: Automation Recon (24/7)
 
 on:
   schedule:
-    - cron: '*/10 * * * *' 
+    - cron: '*/10 * * * *' # Nembak tiap 10 menit
   workflow_dispatch:
 
 jobs:
@@ -56,64 +56,54 @@ jobs:
           # --- 2. PILIH TARGET ACAK ---
           target_file=$(ls targets/*.txt | shuf | head -n 1)
           program_name=$(basename "$target_file" .txt)
-          
           echo "=================================================="
           echo "🎯 TARGETING: $program_name"
           echo "=================================================="
-          
           mkdir -p "data/$program_name"
 
-          # --- 3. SUBFINDER (DIKASIH WAKTU LAMA BIAR LENGKAP) ---
-          echo "[+] Step 1: Subfinder Starting (Sucking all data, Max 20'Min)..."
+          # --- 3. SUBFINDER (Ditambah || true agar tidak merah) ---
+          echo "[+] Step 1: Subfinder Starting..."
           timeout 40m subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1 || true
           
-          count_sub=$(wc -l < "data/$program_name/subdomains.txt" || echo 0)
-          echo "    ✅ Found: $count_sub subdomains."
-
-          if [ "$count_sub" -gt 0 ]; then
+          if [ -s "data/$program_name/subdomains.txt" ]; then
             
-            # --- 4. HTTPX (FULL SCAN) ---
-            echo "[+] Step 2: HTTPX Starting (Verifying all hosts, Max 30 Min)..."
+            # --- 4. HTTPX (Ditambah || true) ---
+            echo "[+] Step 2: HTTPX Live Check..."
             timeout 50m httpx -l "data/$program_name/subdomains.txt" -silent -ip -o "data/$program_name/active_hosts.txt" > /dev/null 2>&1 || true
             
-            count_live=$(wc -l < "data/$program_name/active_hosts.txt" || echo 0)
-            echo "    ✅ Live Targets: $count_live"
-
-            if [ "$count_live" -gt 0 ]; then
+            if [ -s "data/$program_name/active_hosts.txt" ]; then
                 
-                # --- 5. NUCLEI (OUTPUT TXT & JSON) ---
-                echo "[+] Step 3: Nuclei Deep Scan (Output to TXT for you, Max 2 Hour)..."
-                # Kita simpan JSON buat AI, dan TXT buat Bos Josua
-                timeout 4h nuclei -l "data/$program_name/active_hosts.txt" \
+                # --- 5. NUCLEI (Output JSON untuk AI & TXT untuk Bos Josua) ---
+                echo "[+] Step 3: Nuclei Deep Scan..."
+                # Kita tambah || true agar kalau 3 jam habis, dia tetap lanjut ke AI
+                timeout 3h nuclei -l "data/$program_name/active_hosts.txt" \
                   -tags exposure,misconfig,takeover,cve,tech \
                   -c 50 -timeout 3 -retries 0 -stats -si 60 -silent \
                   -o "data/$program_name/HASIL_SCAN_NUCLEI.txt" \
                   -jsonl -o "data/$program_name/nuclei_results.json" || true
                 
-                # --- 6. AI VALIDATION ---
-                echo "[+] Step 4: AI Analysis..."
-                PROGRAM_NAME=$program_name python scripts/validate.py
+                # --- 6. AI VALIDATION (Pasti Jalan walau Nuclei Timeout) ---
+                echo "[+] Step 4: AI Analysis & H1 Drafting..."
+                PROGRAM_NAME=$program_name python scripts/validate.py || true
                 
-                # --- 7. NOTIFIKASI ---
+                # --- 7. NOTIFIKASI TELEGRAM ---
                 if [ -f "data/$program_name/high_findings.txt" ]; then
                   cat "data/$program_name/high_findings.txt" | notify -config notify-config.yaml -id p1_p2_alerts || true
                 fi
-
                 if [ -f "data/$program_name/low_findings.txt" ]; then
                   MSG_LOW=$(cat "data/$program_name/low_findings.txt")
-                  curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_GEN" -d "text=$MSG_LOW" > /dev/null 2>&1
+                  curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_GEN" -d "text=$MSG_LOW" > /dev/null 2>&1 || true
                 fi
 
-                # --- 8. ZIP DATABASE (DENGAN NUCLEI .TXT) ---
+                # --- 8. ZIP DATABASE (TXT MODE) ---
+                echo "[+] Step 5: Sending FULL DATA ZIP..."
                 zip_name="${program_name}_FULL_DATA.zip"
-                # Kita hapus file JSON dari zip biar ZIP nya isinya cuma yang enak dibaca Bos Josua
-                zip -j "$zip_name" data/$program_name/subdomains.txt data/$program_name/active_hosts.txt data/$program_name/HASIL_SCAN_NUCLEI.txt > /dev/null 2>&1
-                
-                curl -F chat_id="$TG_DATA" -F document=@"$zip_name" -F caption="📦 FULL DATABASE: ${program_name^^}" "https://api.telegram.org/bot$TG_TOKEN/sendDocument" > /dev/null 2>&1
+                # Kita bungkus Subdomains, Active Hosts, dan Hasil Scan TXT
+                zip -j "$zip_name" data/$program_name/subdomains.txt data/$program_name/active_hosts.txt data/$program_name/HASIL_SCAN_NUCLEI.txt > /dev/null 2>&1 || true
+                curl -v -F chat_id="$TG_DATA" -F document=@"$zip_name" -F caption="📦 FULL DATABASE: ${program_name^^}" "https://api.telegram.org/bot$TG_TOKEN/sendDocument" > /dev/null 2>&1 || true
                 rm -f "$zip_name"
             fi
           fi
-
           rm -f notify-config.yaml
           echo "=================================================="
           echo "🏁 MISSION FINISHED"
