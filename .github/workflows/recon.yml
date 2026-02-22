@@ -73,9 +73,9 @@ jobs:
 
           # 3. DOUBLE RECON (Gathering Subdomains)
           echo "[+] Step 1: Gathering Subdomains (Double Power)..."
-          subfinder -dL "$target_file" -all -silent -o "data/$program_name/s1.txt" > /dev/null 2>&1 || true
-          cat "$target_file" | assetfinder --subs-only | anew "data/$program_name/s1.txt" > /dev/null 2>&1 || true
-          sort -u "data/$program_name/s1.txt" > "data/$program_name/subdomains.txt"
+          subfinder -dL "$target_file" -all -silent -o "data/$program_name/subdomains.txt" > /dev/null 2>&1 || true
+          cat "$target_file" | assetfinder --subs-only | anew "data/$program_name/subdomains.txt" > /dev/null 2>&1 || true
+          sort -u "data/$program_name/subdomains.txt" > "data/$program_name/clean_subdomains.txt"
           
           if [ -s "data/$program_name/subdomains.txt" ]; then
             # 4. HTTPX LIVE CHECK
