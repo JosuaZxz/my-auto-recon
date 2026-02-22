@@ -1,7 +1,1 @@
-syfe.com
-uat-bugbounty.nonprod.syfe.com
-api-uat-bugbounty.nonprod.syfe.com
-api.syfe.com
-alfred.syfe.com
-mark8.syfe.com
-alfred-uat-31.nonprod.syfe.com
+
