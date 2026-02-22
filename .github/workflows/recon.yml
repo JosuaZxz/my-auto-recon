@@ -33,6 +33,7 @@ jobs:
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          nuclei -update-templates
           go install -v github.com/tomnomnom/assetfinder@latest
           go install -v github.com/tomnomnom/waybackurls@latest
           go install -v github.com/lc/gau/v2/cmd/gau@latest
@@ -85,21 +86,22 @@ jobs:
                 timeout 20m bash -c "cat data/$program_name/active_hosts.txt | waybackurls | anew data/$program_name/urls.txt" > /dev/null 2>&1 || true
                 timeout 20m bash -c "cat data/$program_name/active_hosts.txt | gau --subs --threads 10 | anew data/$program_name/urls.txt" > /dev/null 2>&1 || true
 
-                # 5. NUCLEI SCAN (RELAXED TAGS: LEBIH RAKUS)
-                echo "[+] Step 3: Deep Scan (Including All Years + Fuzzing)..."
-                # Kita balikin tag 'cve' tanpa tahun biar semua disikat
+                # 5. NUCLEI SCAN (MODE RAKUS TOTAL)
+                echo "[+] Step 3: Deep Scan (6500+ Templates)..."
                 timeout 3h nuclei -l "data/$program_name/active_hosts.txt" \
                   -tags exposure,misconfig,takeover,cve,fuzz,exposed-panels \
-                  -severity critical,high,medium \
                   -nt -rl 80 -c 15 -me 10 -stats -si 60 -silent \
                   -jsonl -o "data/$program_name/nuclei_results.json" || true
-                
-                # 6. SCAN URLS (Kalau ada hasil Wayback)
-                if [ -s "data/$program_name/urls.txt" ]; then
-                  echo "[+] Step 3.5: Scanning Historical URLs..."
-                  timeout 45m nuclei -l "data/$program_name/urls.txt" -tags token-leak,extracted-tokens -severity high,critical -silent -jsonl >> "data/$program_name/nuclei_results.json" || true
-                fi
 
+                
+                # 6. SCAN URLS (Mencari Token/API Key Bocor)
+                if [ -s "data/$program_name/urls.txt" ]; then
+                  echo "[+] Step 3.5: Scanning Historical URLs for Secrets..."
+                  timeout 45m nuclei -l "data/$program_name/urls.txt" \
+                    -tags token-leak,extracted-tokens \
+                    -silent -jsonl >> "data/$program_name/nuclei_results.json" || true
+                fi
+                
                 # 7. AI ANALYSIS
                 echo "[+] Step 4: AI Analysis..."
                 PROGRAM_NAME=$program_name python scripts/validate.py
