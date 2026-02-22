@@ -12,31 +12,30 @@ H1_API_KEY = os.environ.get("H1_API_KEY")
 PROGRAM_NAME = os.environ.get("PROGRAM_NAME", "Unknown")
 
 def get_verification_context(data):
-    """Mengecek bukti teknis (IP & DNS) secara real-time"""
+    """
+    Mengambil data teknis mendalam dari Nuclei untuk AI.
+    Ini fitur yang bikin AI punya 'mata' buat liat detail bug.
+    """
     host = data.get("host", "")
-    domain = host.replace("https://", "").replace("http://", "").split(":")[0]
+    info = data.get("info", {})
     current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     
-    context = {
+    return {
+        "template_id": data.get("template-id", "Unknown"),
+        "template_name": info.get("name", "Unknown"),
+        "template_desc": info.get("description", "No description"),
+        "severity": info.get("severity", "unknown"),
+        "matched_url": data.get("matched-at", host),
+        "extracted_results": data.get("extracted-results", []),
         "ip": data.get("ip", "Unknown IP"),
         "status": data.get("info", {}).get("status-code", "Unknown"),
-        "time": current_time,
-        "template": data.get("template-id", "Unknown"),
-        "url": data.get("matched-at", host)
+        "time": current_time
     }
-    
-    # Cek CNAME jika terdeteksi takeover
-    if "takeover" in data.get("template-id", "").lower():
-        try:
-            cname = subprocess.check_output(['dig', 'CNAME', '+short', domain], timeout=5).decode('utf-8').strip()
-            context["dns_cname"] = cname if cname else "No CNAME found"
-        except: context["dns_error"] = "Lookup failed"
-    return context
 
 def create_h1_draft(title, description, impact, severity):
     """Mengirim laporan valid langsung ke Draft HackerOne"""
-    # Bypass khusus mode tes 00_test
-    if PROGRAM_NAME == "00_test": return "TEST-DRAFT-12345"
+    # Bypass khusus mode tes (Abaikan jika bukan berburu asli)
+    if PROGRAM_NAME == "00_test": return "TEST-DRAFT-PRO-2026"
 
     target_handle = "hackerone" if PROGRAM_NAME == "hackerone" else PROGRAM_NAME
     url = "https://api.hackerone.com/v1/hackers/report_intents"
@@ -65,7 +64,7 @@ def create_h1_draft(title, description, impact, severity):
     except: return None
 
 def validate_findings():
-    """Proses utama: Triage AI menggunakan Template Profesional"""
+    """Proses utama: Triage AI menggunakan Template Profesional Bos Josua"""
     print(f"🔍 Starting Professional Triage for: {PROGRAM_NAME}")
     path = f'data/{PROGRAM_NAME}/nuclei_results.json'
     if not os.path.exists(path) or os.stat(path).st_size == 0: return
@@ -76,18 +75,19 @@ def validate_findings():
             if i < 25: 
                 d = json.loads(line)
                 if isinstance(d, list): d = d[0]
-                d["context"] = get_verification_context(d)
-                findings_list.append(d)
+                # Ambil konteks teknis lengkap
+                findings_list.append(get_verification_context(d))
 
-    # Siapkan folder untuk file laporan
+    # Siapkan folder untuk file laporan di memori sementara GitHub
     os.makedirs(f"data/{PROGRAM_NAME}/alerts/high", exist_ok=True)
     os.makedirs(f"data/{PROGRAM_NAME}/alerts/low", exist_ok=True)
 
-    # --- [TEMPLATELAPORAN PROFESIONAL] ---
+    # --- [TEMPLATELAPORAN PROFESIONAL BOS JOSUA] ---
     report_template = """
 ## Vulnerability Details
 **Title:** {title}
 **Severity:** {severity_label}
+**Category:** {category}
 **Affected Asset:** {url}
 
 ## Summary
@@ -100,15 +100,14 @@ def validate_findings():
 {tech_details}
 
 ## Steps To Reproduce
-1. Access {url}
+1. Access the target at {url}
 2. {step_2}
 3. {step_3}
 
 ## Proof of Concept
-Vulnerability detected via Nuclei automation.
-- **Template ID:** {template_id}
-- **Status Code:** {status}
-- **Resolved IP:** {ip}
+The automated scan identified this issue using Nuclei template `{template_id}`.
+Resolved IP: {ip}
+Status Code: {status}
 
 ## Discovery Process
 Automated discovery using customized ProjectDiscovery Nuclei sniper drones during authorized security testing.
@@ -123,23 +122,27 @@ Automated discovery using customized ProjectDiscovery Nuclei sniper drones durin
 {remediation_plan}
     """
 
-    # --- PROMPT AI ---
+    # --- PROMPT AI GRANDMASTER ---
     prompt = f"""
     ROLE: Senior Triage Specialist at HackerOne.
     PROGRAM: {PROGRAM_NAME}
     DATA: {json.dumps(findings_list)}
 
     TASK:
-    Write a separate, high-quality technical report for each valid bug using this template:
+    Write a separate, high-quality technical report for each valid bug using the provided template. 
+    Be very specific about the 'Impact' section (split into Business and Technical impact).
+    
+    TEMPLATE TO FILL:
     {report_template}
 
     INSTRUCTIONS:
     1. Fill every placeholder in the template with professional detail.
-    2. Focus heavily on 'Impact' (Business and Technical risks).
+    2. Focus heavily on 'Impact' (Detailed Business and Technical risks).
     3. Categorize as 'Critical', 'High', 'Medium', or 'Low'.
     
     FORMAT: Return ONLY a raw JSON ARRAY of objects:
-    [ {{"title": "...", "description": "MARKDOWN_REPORT_HERE", "impact": "IMPACT_COLUMN_ONLY", "severity": "..."}} ]
+    [ {{"title": "...", "description": "FULL_MARKDOWN_REPORT", "impact": "IMPACT_SECTION_ONLY", "severity": "..."}} ]
+    If nothing valid: NO_VALID_BUG
     """
 
     try:
@@ -160,19 +163,19 @@ Automated discovery using customized ProjectDiscovery Nuclei sniper drones durin
                 # 1. Kirim Draf ke HackerOne
                 d_id = create_h1_draft(rep['title'], rep['description'], rep['impact'], rep['severity'])
                 
-                # 2. Tentukan Jalur Severity
+                # 2. Tentukan Jalur P-Level
                 sev = rep.get('severity', 'Medium').upper()
                 p_label = "P1-P2" if sev in ["CRITICAL", "HIGH"] else "P3-P4"
                 folder = "high" if p_label == "P1-P2" else "low"
                 
                 # 3. Buat File Markdown untuk dikirim ke Telegram
                 safe_name = re.sub(r'\W+', '_', rep['title'])[:50]
-                file_path = f"data/{PROGRAM_NAME}/alerts/{folder}/{p_label}_{safe_name}.md"
+                file_path = f"data/{PROGRAM_NAME}/alerts/{folder}/{p_label}_{safe_name}_{idx}.md"
                 
                 md_content = f"# {rep['title']}\n\n"
-                md_content += f"**Draft ID:** `{d_id or 'Manual_Check'}`\n"
+                md_content += f"**Draft ID:** `{d_id or 'Manual_Check_Required'}`\n"
                 md_content += f"**Program:** {PROGRAM_NAME.upper()}\n"
-                md_content += f"**Severity:** {sev}\n\n"
+                md_content += f"**Label:** {p_label}\n\n"
                 md_content += f"{rep['description']}\n\n"
                 md_content += f"## Impact Analysis\n{rep['impact']}"
 
