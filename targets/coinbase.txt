@@ -1,15 +1,4 @@
 coinbase.com
-54.175.255.192/27
-cbhq.net
-pro.coinbase.com
-custody.coinbase.com
-commerce.coinbase.com
-prime.coinbase.com
-institutional.coinbase.com
-api.coinbase.com
-api.custody.coinbase.com
-base.org
-cloud.coinbase.com
-international.coinbase.com
-nft.coinbase.com
 coinbase-corp.com
+cbhq.net
+base.org
