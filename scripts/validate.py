@@ -4,9 +4,10 @@ import requests
 import subprocess
 import re
 import time
+import hashlib
 from datetime import datetime
 
-# --- [1. KONFIGURASI GITHUB SECRETS] ---
+# --- [1. KONFIGURASI] ---
 AI_KEY = os.environ.get("GROQ_API_KEY")
 H1_USER = os.environ.get("H1_USERNAME")
 H1_API_KEY = os.environ.get("H1_API_KEY")
@@ -14,32 +15,32 @@ PROGRAM_NAME = os.environ.get("PROGRAM_NAME", "Unknown")
 SEEN_DB = ".seen_urls"
 
 def get_verification_context(data):
-    """Mengumpulkan bukti teknis IP, DNS, dan Waktu"""
+    """Mengumpulkan bukti teknis IP, DNS, dan Deskripsi Template"""
     host = data.get("host", "")
-    domain = host.replace("https://", "").replace("http://", "").split(":")[0]
+    info = data.get("info", {})
     current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     
-    context = {
+    return {
         "template_id": data.get("template-id", "Unknown"),
-        "template_name": data.get("info", {}).get("name", "Unknown"),
+        "template_name": info.get("name", "Unknown"),
+        "template_desc": info.get("description", "No description"),
+        "severity": info.get("severity", "unknown"),
+        "matched_url": data.get("matched-at", host),
         "ip": data.get("ip", "Unknown IP"),
         "status": data.get("info", {}).get("status-code", "Unknown"),
-        "time": current_time,
-        "url": data.get("matched-at", host)
+        "time": current_time
     }
-    
-    if "takeover" in data.get("template-id", "").lower():
-        try:
-            cname = subprocess.check_output(['dig', 'CNAME', '+short', domain], timeout=5).decode('utf-8').strip()
-            context["dns_cname"] = cname if cname else "No CNAME record"
-        except: context["dns_cname"] = "Failed"
-    return context
 
 def create_h1_draft(title, description, impact, severity, url):
-    """Kirim laporan ke HackerOne Draft dengan Cek Duplikat"""
+    """Kirim laporan ke H1 dengan sistem Hashing URL (Stealth)"""
+    # Gunakan MD5 Hash agar list URL di repo Public tidak bisa dibaca manusia
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    
     if os.path.exists(SEEN_DB):
         with open(SEEN_DB, "r") as f:
-            if url in f.read(): return "ALREADY_REPORTED"
+            if url_hash in f.read():
+                print(f"[-] Duplicate skipped (Hashed): {url_hash}")
+                return "ALREADY_REPORTED"
 
     if PROGRAM_NAME == "00_test": return "TEST-DRAFT-ID-2026"
 
@@ -47,109 +48,65 @@ def create_h1_draft(title, description, impact, severity, url):
     auth = (H1_USER, H1_API_KEY)
     h1_sev = "high" if severity.lower() in ["critical", "high"] else "medium"
     
-    payload = {
-        "data": {
-            "type": "report-intent",
-            "attributes": {
-                "team_handle": target_handle,
-                "title": title,
-                "description": description,
-                "impact": impact,
-                "severity_rating": h1_sev
-            }
-        }
-    }
+    payload = {"data": {"type": "report-intent", "attributes": {"team_handle": target_handle, "title": title, "description": description, "impact": impact, "severity_rating": h1_sev}}}
     
     try:
-        time.sleep(2)
+        time.sleep(2) # Anti-Spam Delay
         res = requests.post("https://api.hackerone.com/v1/hackers/report_intents", auth=auth, headers={"Accept": "application/json"}, json=payload)
         if res.status_code == 201:
-            with open(SEEN_DB, "a") as f: f.write(f"{url}\n")
+            with open(SEEN_DB, "a") as f: f.write(f"{url_hash}\n")
             return res.json()['data']['id']
     except: pass
     return None
 
 def validate_findings():
-    print(f"🔍 Starting Professional Triage for: {PROGRAM_NAME}")
+    print(f"🔍 Starting Grandmaster Triage: {PROGRAM_NAME}")
     path = f'data/{PROGRAM_NAME}/nuclei_results.json'
     if not os.path.exists(path) or os.stat(path).st_size == 0: return
 
     findings_list = []
+    # Filter kualitas: Cuma Medium ke atas & buang yang berisik
+    trash = ["ssl-issuer", "tech-detect", "tls-version", "http-missing-security-headers"]
+    
     with open(path, 'r') as f:
         for line in f:
             try:
                 d = json.loads(line)
+                if isinstance(d, list): d = d[0]
                 sev = d.get("info", {}).get("severity", "info").lower()
-                if sev in ["medium", "high", "critical"]:
+                tid = d.get("template-id", "").lower()
+                
+                if sev in ["medium", "high", "critical"] and not any(t in tid for t in trash):
                     findings_list.append(get_verification_context(d))
                 if len(findings_list) >= 15: break
             except: continue
 
     if not findings_list: return
 
-    # --- [TEMPLATE LAPORAN PROFESIONAL ASLI DARI BOS JOSUA] ---
-    report_template = """
-## Vulnerability Details
+    # --- [REPORT TEMPLATE PRO BOS JOSUA] ---
+    report_template = """## Vulnerability Details
 **Title:** {title}
 **Severity:** {severity}
-**Category:** {category}
 **Affected Asset:** {url}
-
 ## Summary
 {summary}
-
 ## Impact
 ### Business Impact:
 {business_impact}
-
 ### Technical Impact:
 {technical_impact}
-
-### Affected Users/Data:
-{affected_data}
-
 ## Technical Details
 {technical_explanation}
-
 ## Steps To Reproduce
-1. {step_1}
+1. Navigate to {url}
 2. {step_2}
 3. {step_3}
-
-## Proof of Concept
-Vulnerability detected via Nuclei automation.
-- **Template ID:** {template_id}
-- **Status Code:** {status}
-- **Resolved IP:** {ip}
-
-## Discovery Process
-Automated discovery using customized ProjectDiscovery Nuclei sniper drones during authorized security testing.
-
-## Testing Environment
-- **IP Address(es):** {ip}
-- **User Agent:** Mozilla/5.0 (Windows NT 10.0; Win64; x64) SniperRecon/2026
-- **Testing Timezone:** UTC
-- **Testing Period:** {time}
-
+## Environment
+- IP: {ip} | User-Agent: SniperRecon/2026
 ## Remediation
-{remediation_plan}
-    """
+{remediation_plan}"""
 
-    prompt = f"""
-    ROLE: Senior Triage Specialist at HackerOne.
-    PROGRAM: {PROGRAM_NAME}. DATA: {json.dumps(findings_list)}
-    
-    TASK: Write a separate, professional HackerOne report for each valid bug.
-    USE THIS EXACT TEMPLATE:
-    {report_template}
-
-    INSTRUCTIONS:
-    - Fill every section with technical detail.
-    - Impact field in the JSON output should ONLY contain the full '## Impact' section text.
-    - Description field should contain all other sections.
-    - Output ONLY a JSON ARRAY: [{{title, description, impact, severity, url}}]
-    - If nothing valid: NO_VALID_BUG
-    """
+    prompt = f"Role: Senior Triage Lead. Data: {json.dumps(findings_list)}. Write technical reports using template: {report_template}. Output ONLY a JSON ARRAY: [{{title, description, impact, severity, url}}]. If nothing valid: NO_VALID_BUG"
 
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -176,7 +133,6 @@ Automated discovery using customized ProjectDiscovery Nuclei sniper drones durin
                 safe_title = re.sub(r'\W+', '_', rep['title'])[:50]
                 with open(f"data/{PROGRAM_NAME}/alerts/{folder}/{p_label}_{safe_title}_{idx}.md", 'w') as f:
                     f.write(f"# {rep['title']}\n\nDraft ID: `{d_id}`\n\n{rep['description']}\n\n## Impact\n{rep['impact']}")
-
     except Exception as e: print(f"Error: {e}")
 
 if __name__ == "__main__":
