@@ -126,14 +126,16 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: NUCLEI KILLSHOT - FIX VERSION] ---
+                # --- [STEP 4: NUCLEI KILLSHOT - ANTI-BLOCK VERSION] ---
                 echo "[+] Phase 1: Deep Scanning Gold (P1-P3)..."
-                # 1. Kita JANGAN arahkan ke folder spesifik, biarkan Nuclei cari di database pusatnya
-                # 2. Turunkan RL ke 50 khusus buat tes ini agar tidak diblokir server vulnweb
+                # 1. Kita tambahkan flag -ni (No Interactivity) biar Nuclei gak cek ulang host (langsung tembak!)
+                # 2. Kita turunkan RL ke 20 agar server target gak pingsan/ngeblock
+                # 3. Kita masukkan severity 'low' dulu buat PEMBUKTIAN kalau mesin ini beneran dapet bug
                 timeout 1h nuclei -l "data/$program_name/filtered_endpoints.txt" \
-                  -severity critical,high,medium \
+                  -t $HOME/nuclei-templates \
+                  -severity critical,high,medium,low \
                   -et dns,ssl,whois -es info \
-                  -rl 50 -c 20 -mhe 300 -no-color \
+                  -ni -rl 20 -c 10 -mhe 500 -no-color \
                   -H "User-Agent: NovaRecon/2026" \
                   -jsonl -o "data/$program_name/nuclei_results.json" || [ $? -eq 124 ] || true
 
