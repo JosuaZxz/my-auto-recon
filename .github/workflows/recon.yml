@@ -1,9 +1,9 @@
 name: Automation Recon (24/7)
 
 on:
-  schedule:
-    - cron: '13,33,53 * * * *' 
-  workflow_dispatch:
+  # schedule:
+  #   - cron: '13,33,53 * * * *' # Dimatikan sementara untuk testing manual
+  workflow_dispatch: # Ini yang bikin tombol "Run Workflow" tetap ada
 
 jobs:
   recon-job:
@@ -126,18 +126,25 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: NUCLEI KILLSHOT] ---
+                # --- [STEP 4: NUCLEI KILLSHOT - FIX PATH] ---
                 echo "[+] Phase 1: Deep Scanning Gold (P1-P3)..."
-                # Kita tambahkan logika: Jika error 124 (timeout), tetap dianggap sukses (true) agar lanjut ke AI
-                timeout 1h nuclei -l "data/$program_name/filtered_endpoints.txt" \
+                # Tambahkan flag -t secara manual ke folder template
+                timeout 1h nuclei -l "data/$program_name/all_endpoints.txt" \
+                  -t /home/runner/nuclei-templates \
                   -severity critical,high,medium \
                   -et dns,ssl,whois -es info \
                   -rl 100 -c 50 -mhe 100 -no-color \
                   -H "User-Agent: NovaRecon/2026" \
                   -jsonl -o "data/$program_name/nuclei_results.json" || [ $? -eq 124 ] || true
 
-                # STEP 5: TOKEN SCAN
-                timeout 15m nuclei -l "data/$program_name/filtered_endpoints.txt" -t http/exposed-tokens/ -rl 150 -no-color -silent -jsonl -o "data/$program_name/token_results.json" || true
+                # --- [STEP 5: SENSITIVE TOKENS SCAN - FIX PATH] ---
+                echo "[+] Phase 2: Scanning for Sensitive Tokens..."
+                # Gunakan path lengkap agar tidak "FTL" lagi
+                timeout 15m nuclei -l "data/$program_name/all_endpoints.txt" \
+                  -t /home/runner/nuclei-templates/http/exposed-tokens/ \
+                  -H "User-Agent: NovaRecon/2026" \
+                  -rl 100 -c 50 -no-color -mhe 100 -jsonl -o "data/$program_name/token_results.json" || true
+                
                 [ -f "data/$program_name/token_results.json" ] && cat "data/$program_name/token_results.json" >> "data/$program_name/nuclei_results.json"
 
                 # STEP 6: AI ANALYSIS
