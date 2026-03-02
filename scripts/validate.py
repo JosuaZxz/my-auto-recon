@@ -34,7 +34,6 @@ def get_verification_context(data):
 
 def create_h1_draft(title, description, impact, severity, url):
     """Kirim laporan ke H1 dengan sistem Hashing URL (Stealth)"""
-    # Use MD5 Hash to make the URL list in the Public repo unreadable to humans
     url_hash = hashlib.md5(url.encode()).hexdigest()
     
     if os.path.exists(SEEN_DB):
@@ -43,7 +42,13 @@ def create_h1_draft(title, description, impact, severity, url):
                 print(f"[-] Duplicate skipped (Hashed): {url_hash}")
                 return "ALREADY_REPORTED"
 
-    if PROGRAM_NAME == "00_test": return "TEST-DRAFT-ID-2026"
+    # --- [BAGIAN INI YANG WAJIB DIEDIT] ---
+    # Kita paksa return ID palsu kalau targetnya cuma testing
+    # Agar script TIDAK mencoba connect ke API HackerOne
+    if PROGRAM_NAME in ["00_test", "test_target"]: 
+        print("[+] Test Mode: Skipping H1 Upload. Generating Telegram Alert...")
+        return "TEST-DRAFT-ID-2026"
+    # --------------------------------------
 
     target_handle = "hackerone" if PROGRAM_NAME == "hackerone" else PROGRAM_NAME
     auth = (H1_USER, H1_API_KEY)
