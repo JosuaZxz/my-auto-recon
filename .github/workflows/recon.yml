@@ -35,23 +35,13 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt-get update
-          # 1. Chrome & Deps
-          sudo apt-get install -y google-chrome-stable libnss3 libgbm-dev dnsutils \
-            libasound2t64 libatk-bridge2.0-0 libgtk-3-0 libxss1 xvfb libgbm1 python3-pip
-          
-          # Symlink Chrome
+          sudo apt-get install -y google-chrome-stable libnss3 libgbm-dev dnsutils python3-pip
           sudo ln -sf /usr/bin/google-chrome-stable /usr/bin/google-chrome
-          
-          # 2. Install Python Utils (JURUS BARU: URO)
           pip3 install uro
-          
-          # 3. Install Tools ProjectDiscovery
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           go install -v github.com/projectdiscovery/katana/cmd/katana@latest
-          
-          # 4. Install Crawler
           go install -v github.com/hakluke/hakrawler@latest
           go install -v github.com/tomnomnom/assetfinder@latest
           go install -v github.com/tomnomnom/waybackurls@latest
@@ -59,9 +49,8 @@ jobs:
           go install -v github.com/tomnomnom/anew@latest
           
           echo "$HOME/go/bin" >> $GITHUB_PATH
-          # Pastikan path python ada agar uro terbaca
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          nuclei -update-templates
+          # JURUS KUNCI: Download peluru ke folder yang pasti ada
+          /home/runner/go/bin/nuclei -ut -ud /home/runner/nuclei-templates
           
       - name: Run Predator Recon
         env:
@@ -140,20 +129,22 @@ jobs:
                 # agar tidak ada error 'no address found'
                 cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405 -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
 
-                # Eksekusi Nuclei pada target yang benar-benar LIVE
+                # --- [STEP 4: NUCLEI CORE SCAN] ---
+                echo "[+] Step 4: Core Scanning..."
+                # Gunakan jalur absolut /home/runner/nuclei-templates
                 timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
-                  -t $HOME/nuclei-templates \
+                  -t /home/runner/nuclei-templates \
                   -severity critical,high,medium,low \
                   -et dns,ssl,whois -es info \
                   -rl 10 -c 5 -retries 3 -timeout 15 -no-color -silent \
                   -disable-clustering \
                   -H "User-Agent: NovaRecon/2026" \
-                  -jsonl -o "data/$program_name/nuclei_results.json" || true
+                  -jsonl -o "data/$program_name/nuclei_results.json" | true
 
-                # --- [STEP 5: SENSITIVE TOKENS SCAN (STEALTH)] ---
+                # --- [STEP 5: SENSITIVE TOKENS SCAN] ---
                 echo "[+] Step 5: Token Discovery..."
                 timeout 20m nuclei -l "data/$program_name/final_live_targets.txt" \
-                  -t $HOME/nuclei-templates \
+                  -t /home/runner/nuclei-templates \
                   -tags token,keys,credential,exposure \
                   -nmhe -rl 10 -c 5 -no-color -silent \
                   -H "User-Agent: NovaRecon/2026" \
