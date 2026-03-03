@@ -129,24 +129,23 @@ def validate_findings():
 """
 
     # 3. Prompt AI dengan Instruksi REPRODUCTION URL (Tinggal Klik)
-    prompt = f"""Role: Elite Cyber Security Analyst.
+    # 3. Prompt AI: Versi Anti-Ngaco & Pro PoC
+    prompt = f"""Role: Senior Bug Bounty Hunter (Triage Specialist).
 Data Findings: {json.dumps(findings_list)}.
 
-Task: Write a Professional Bug Bounty Report.
+Task: Create a highly technical and professional bug report for each UNIQUE vulnerability.
+
 STRICT RULES:
-1. BUG TYPE: You MUST identify the bug type BASED ON 'template_name' and 'template_id'. 
-   - If template is 'Cross Site Scripting', the title and analysis MUST be about XSS.
-   - If template is 'SQL Injection', the title MUST be about SQLi.
-   - DO NOT be fooled by database errors if the payload used is a <script> tag.
-2. PAYLOAD: Identify the exact payload used from the 'request_evidence'. 
-3. REPRODUCTION: Provide a 'reproduction_url' that is the 'matched_url' from the data.
-4. CVE: Only mention a CVE if it is explicitly listed in the 'template_id'.
-5. VERBOSE: Make the 'Technical Analysis' and 'Impact' sections long, technical, and accurate.
+1. SINKRONISASI BUKTI: Jika template_name adalah 'Cross Site Scripting' tapi response_evidence hanya menunjukkan 'SQL Syntax Error', jelaskan dalam Technical Analysis bahwa input tersebut menyebabkan anomali pada backend, namun tetap kategorikan sesuai template_id.
+2. PAYLOAD HIGHLIGHT: Selalu bungkus payload dengan backticks (contoh: `<script>alert(1)</script>`).
+3. REPRODUCTION URL: Wajib membuat URL lengkap yang sudah terpasang payload agar Triage bisa LANGSUNG KLIK.
+4. EVIDENCE ANALYSIS: Di bagian Technical Analysis, jelaskan bagian mana dari HTTP Response yang membuktikan bug tersebut (misal: payload terefleksi di HTML atau memicu error database).
+5. NO DUPLICATE: Jangan membuat dua laporan untuk bug yang sama.
+
+Output ONLY a JSON ARRAY of objects: ["title", "severity", "url", "full_markdown"].
 
 Template:
-{luxury_template}
-
-Output ONLY a JSON ARRAY of objects: ["title", "severity", "url", "full_markdown"]."""
+{luxury_template}"""
     try:
         # 4. AI Execution
         url = "https://api.groq.com/openai/v1/chat/completions"
