@@ -165,27 +165,30 @@ jobs:
                 echo "[+] Step 6: Grandmaster AI Triage processing..."
                 PROGRAM_NAME=$program_name python scripts/validate.py > /dev/null 2>&1 || true
 
-                # STEP 7: SULTAN NOTIFICATION (SMART CAPTION)
+                # STEP 7: SULTAN NOTIFIKASI (SMART CAPTION & ALL SEVERITIES)
+                # 1. Kirim Bug HIGH / CRITICAL ke Grup Critical
                 if [ -d "data/$program_name/alerts/high" ]; then
                   for f in data/$program_name/alerts/high/*.md; do
                     [ -e "$f" ] || continue
                     # Ambil baris pertama (Judul Bug) sebagai caption
-                    TITLE_CAPTION=$(head -n 1 "$f" | sed 's/# //g' | cut -c1-60)
+                    TITLE_CAPTION=$(head -n 1 "$f" | sed 's/# //g' | cut -c1-100)
                     curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendDocument" \
                       -F chat_id="$TG_CRIT" \
                       -F document=@"$f" \
-                      -F caption="🚨 CRITICAL: $TITLE_CAPTION" > /dev/null 2>&1
+                      -F caption="🚨 CRITICAL FOUND: $TITLE_CAPTION" > /dev/null 2>&1
                   done
                 fi
 
+                # 2. Kirim Bug MEDIUM / LOW ke Grup General
                 if [ -d "data/$program_name/alerts/low" ]; then
                   for f in data/$program_name/alerts/low/*.md; do
                     [ -e "$f" ] || continue
-                    TITLE_CAPTION=$(head -n 1 "$f" | sed 's/# //g' | cut -c1-60)
+                    # Ambil baris pertama (Judul Bug) sebagai caption
+                    TITLE_CAPTION=$(head -n 1 "$f" | sed 's/# //g' | cut -c1-100)
                     curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendDocument" \
                       -F chat_id="$TG_GEN" \
                       -F document=@"$f" \
-                      -F caption="⚠️ MEDIUM: $TITLE_CAPTION" > /dev/null 2>&1
+                      -F caption="⚠️ MEDIUM FOUND: $TITLE_CAPTION" > /dev/null 2>&1
                   done
                 fi
 
