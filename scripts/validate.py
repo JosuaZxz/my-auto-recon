@@ -61,7 +61,7 @@ def create_h1_draft(title, description, impact, severity, url):
     return None
 
 def validate_findings():
-    print(f"[*] Starting Professional Triage for: {PROGRAM_NAME}")
+    print(f"🔍 Starting Professional Triage for: {PROGRAM_NAME}")
     path = f'data/{PROGRAM_NAME}/nuclei_results.json'
     if not os.path.exists(path) or os.stat(path).st_size == 0: return
 
@@ -74,7 +74,7 @@ def validate_findings():
                 all_findings.append(d)
             except: continue
 
-    # Priority Ranking
+    # 1. Priority Ranking
     sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
     all_findings.sort(key=lambda x: sev_rank.get(x.get("info",{}).get("severity","info").lower(), 0), reverse=True)
 
@@ -89,7 +89,7 @@ def validate_findings():
 
     if not findings_list: return
 
-    # --- [ SULTAN TEMPLATE SECTION ] ---
+    # 2. Luxury Template (Sultan Edition)
     luxury_template = """
 .# {title}
 
@@ -107,8 +107,9 @@ def validate_findings():
 
 .## 🚀 Steps To Reproduce (PoC)
 1. **Target Navigation:** Navigate to {url}
-2. **Attack Vector:** Inject payload `{payload_used}` into the affected parameter.
-3. **Observation:** {step_3}
+2. **Attack Vector:** Inject payload `{payload_used}` into the parameter.
+3. **Reproduction URL:** {reproduction_url}
+4. **Observation:** {step_3}
 
 .## 🛡️ Proof of Concept (Evidence)
 
@@ -117,50 +118,45 @@ def validate_findings():
 {request_evidence}
 .```
 
-.### HTTP Response (Vulnerable Response):
+.### HTTP Response:
 .```http
 {response_evidence}
 .```
 
 .## ⚠️ Impact Analysis
-
-.### 🏢 Business Impact:
-{business_impact}
-
-.### 💻 Technical Impact:
-{technical_impact}
+- **Business Impact:** {business_impact}
+- **Technical Impact:** {technical_impact}
 
 .## ✅ Remediation
 {remediation_plan}
-
----
-*Reported by NovaRecon v5.1 (Platinum Sniper Edition)*
 """
 
-    prompt = f"""Role: Senior Cyber Security Researcher. 
-Data Findings: {json.dumps(findings_list)}. 
+    # 3. Prompt AI dengan Instruksi REPRODUCTION URL (Tinggal Klik)
+    prompt = f"""Role: Senior Bug Bounty Hunter.
+Data Findings: {json.dumps(findings_list)}.
 
-Task: Write a PROFESSIONAL report for each unique bug using the template provided.
-Instructions:
-- Fill placeholders based on evidence.
-- Wrap ALL payloads in backticks (e.g. `payload`).
-- Be verbose and technical in Technical Analysis.
-- Explain how the HTTP Response proves the vulnerability.
-- Output ONLY a JSON ARRAY: [{{ "title": "...", "severity": "...", "url": "...", "full_markdown": "..." }}].
+Task: Create a Professional Technical Report.
+SPECIAL INSTRUCTION for PoC:
+- In 'Steps to Reproduce', PROVIDE A CLEAR REPRODUCTION URL. 
+- The URL must include the payload so the Triage team can JUST CLICK IT to see the bug.
+- If it's a POST request, explain clearly which parameters to change.
 
 Template:
-{luxury_template}"""
+{luxury_template}
 
+Output ONLY a JSON ARRAY..."""
     try:
+        # 4. AI Execution
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {AI_KEY}"}
         payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
-
-        print(f"[*] Analyzing with AI...")
+        
+        print(f"[*] Sending to AI...")
         res = requests.post(url, headers=headers, json=payload, timeout=120)
         if res.status_code != 200: return
         ai_out = res.json()['choices'][0]['message']['content'].strip()
 
+        # 5. Parsing & Penulisan Laporan (Loop yang kamu tanyakan)
         match = re.search(r'\[.*\]|\{.*\}', ai_out, re.DOTALL)
         if match:
             reports = json.loads(match.group(0), strict=False)
@@ -170,8 +166,8 @@ Template:
             os.makedirs(f"data/{PROGRAM_NAME}/alerts/low", exist_ok=True)
 
             for idx, rep in enumerate(reports):
-                # Buat draf lengkap di H1
-                d_id = create_h1_draft(rep['title'], rep['full_markdown'], "See detail in markdown.", rep['severity'], rep.get('url', ''))
+                # Buat draf di HackerOne
+                d_id = create_h1_draft(rep['title'], rep['full_markdown'], "See detail.", rep['severity'], rep.get('url', ''))
                 if d_id in [None, "ALREADY_REPORTED"]: continue
                 
                 sev = rep.get('severity', 'Medium').upper()
@@ -181,11 +177,15 @@ Template:
                 report_path = f"data/{PROGRAM_NAME}/alerts/{folder}/{safe_title}_{idx}.md"
                 
                 with open(report_path, 'w') as f:
+                    # JUDUL DI BARIS PERTAMA (PENTING UNTUK NOTIF TELEGRAM)
+                    f.write(f"# {rep['title']} in {PROGRAM_NAME}\n\n")
+                    f.write(f"🆔 **Draft ID:** `{d_id}`\n\n")
+                    
                     # Bersihkan titik penanda secara otomatis
                     final_report = rep['full_markdown'].replace(".#", "#").replace(".##", "##").replace(".###", "###").replace(".```", "```")
-                    f.write(f"🆔 **Draft ID:** `{d_id}`\n\n" + final_report)
+                    f.write(final_report)
                 
-                print(f"[+] Report Processed: {rep['title']}")
+                print(f"[+] Success: {rep['title']} for {PROGRAM_NAME}")
 
     except Exception as e: print(f"Error: {e}")
 
