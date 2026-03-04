@@ -7,7 +7,7 @@ import time
 import hashlib
 from datetime import datetime
 
-# --- [ 1. CONFIGURATION ] ---
+# --- [ CONFIGURATION ] ---
 AI_KEY = os.environ.get("GROQ_API_KEY")
 H1_USER = os.environ.get("H1_USERNAME")
 H1_API_KEY = os.environ.get("H1_API_KEY")
@@ -22,8 +22,8 @@ def get_verification_context(data):
         "severity": info.get("severity", "unknown"),
         "matched_url": data.get("matched-at", data.get("host", "")),
         "ip": data.get("ip", "Unknown IP"),
-        "request_evidence": data.get("request", "")[:2000], # Ambil lebih banyak
-        "response_evidence": data.get("response", "")[:2000], # Ambil lebih banyak
+        "request_evidence": data.get("request", "")[:2000],
+        "response_evidence": data.get("response", "")[:2000],
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     }
 
@@ -34,7 +34,7 @@ def create_h1_draft(title, description, impact, severity, url):
             if url_hash in f.read():
                 return "ALREADY_REPORTED"
 
-    # Bypass H1 API jika program testing (HAPUS BARIS 'with open' JIKA MAU MATIKAN MEMORI SAAT TEST)
+    # MODE TESTING (Biarkan tanpa memory dulu biar puas testingnya)
     if PROGRAM_NAME in ["00_test", "test_target"]: 
         return "TEST-DRAFT-ID-2026"
 
@@ -54,7 +54,7 @@ def create_h1_draft(title, description, impact, severity, url):
     return None
 
 def validate_findings():
-    print(f"🔍 Starting Professional Triage for: {PROGRAM_NAME}")
+    print(f"🔍 Starting Intelligence Triage for: {PROGRAM_NAME}")
     path = f'data/{PROGRAM_NAME}/nuclei_results.json'
     if not os.path.exists(path) or os.stat(path).st_size == 0: return
 
@@ -67,7 +67,6 @@ def validate_findings():
                 all_findings.append(d)
             except: continue
 
-    # Priority Ranking
     sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
     all_findings.sort(key=lambda x: sev_rank.get(x.get("info",{}).get("severity","info").lower(), 0), reverse=True)
 
@@ -82,7 +81,7 @@ def validate_findings():
 
     if not findings_list: return
 
-    # --- [ SULTAN TEMPLATE ] ---
+    # --- TEMPLATE ---
     luxury_template = """
 .# {title}
 
@@ -99,73 +98,54 @@ def validate_findings():
 {technical_explanation}
 
 .## 🚀 Steps To Reproduce (PoC)
-1. **Target Navigation:** Navigate to {url}
-2. **Attack Vector:** Inject payload `{payload_used}` into the affected parameter.
-3. **Reproduction URL:** {reproduction_url}
-4. **Evidence:** {step_3}
+1. **Target:** {url}
+2. **Attack Vector:** {step_2}
+3. **Payload:** `{payload_used}`
+4. **Reproduction Link:** {reproduction_url}
 
 .## 🛡️ Proof of Concept (Evidence)
-
-.### HTTP Request:
 .```http
 {request_evidence}
 .```
-
-.### HTTP Response (Snippet):
 .```http
 {response_evidence}
 .```
 
 .## ⚠️ Impact Analysis
-
-.### 🏢 Business Impact:
-{business_impact}
-
-.### 💻 Technical Impact:
-{technical_impact}
+- **Business:** {business_impact}
+- **Technical:** {technical_impact}
 
 .## ✅ Remediation
 {remediation_plan}
 
----
-*Reported by NovaRecon v5.1 (Platinum Sniper Edition)*
 """
 
-    # --- [ PROMPT SUPER CERDAS ] ---
-    prompt = f"""Role: Elite Bug Bounty Triage.
-Data Findings: {json.dumps(findings_list)}.
+    # --- PROMPT CERDAS (EVIDENCE OVER TEMPLATE) ---
+    prompt = f"""Role: Elite Security Researcher.
+Data: {json.dumps(findings_list)}.
 
-Task: Create a Flawless Bug Report for EACH unique vulnerability.
+Task: Analyze the findings and write a Professional Report.
 
-CRITICAL RULES FOR ACCURACY:
-1. HYBRID BUG HANDLING (Important for vulnweb): 
-   - If you see an XSS payload (`<script>`) causing a "SQL Syntax Error" in the response:
-   - TITLE MUST BE: "Reflected XSS via Verbose SQL Error Message".
-   - ANALYSIS: Explain that the application fails to handle special characters, causing a database error that reflects the input back to the browser without encoding. This allows XSS execution.
-   - Do NOT call it SQL Injection if the goal is XSS. Call it "Error-based reflection".
-
-2. URL CLEANING:
-   - If the URL looks messy (e.g., `/Mod_Rewrite_Shop/.../wp-content/...`), SIMPLIFY IT to the shortest valid path that triggers the bug.
-   - Use the `matched_url` as the primary reference.
-
-3. PARAMETER ACCURACY:
-   - Look closely at the `request_evidence`. Identify EXACTLY which parameter carries the payload (e.g., `id`, `cat`, `first`). Use THAT parameter in the report.
-
-4. FORMATTING:
-   - Wrap payloads in backticks: `<script>alert(1)</script>`.
-   - Provide a clickable `reproduction_url` with the payload included.
+CRITICAL RULES (FIXING PREVIOUS ERRORS):
+1. EVIDENCE OVER RULING: Look at 'response_evidence'. 
+   - If it contains "SQL syntax error" or "MySQL", YOU MUST REPORT IT AS 'SQL INJECTION', even if the template name says XSS.
+   - SQL Injection is higher impact than XSS. Prioritize it.
+2. CLEAN URLS: If the 'matched_url' looks like a mess (e.g. has multiple paths like /wp-content/ combined with /plugins/), CLEAN IT UP. Only keep the valid path that triggers the bug.
+3. REPRODUCTION URL: Provide a clean, clickable URL.
+4. HIGHLIGHT: Wrap payloads in backticks `<script>`.
+5. REMEDIATION: If you report SQLi, suggest Prepared Statements. If XSS, suggest Encoding.
 
 Template:
 {luxury_template}
 
-Output ONLY a JSON ARRAY of objects: ["title", "severity", "url", "full_markdown"]."""
+Output ONLY a JSON ARRAY: ["title", "severity", "url", "full_markdown"]."""
 
     try:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {AI_KEY}"}
         payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
         
-        print(f"[*] Sending findings to AI for {PROGRAM_NAME}...")
+        print(f"[*] Analyzing with AI...")
         res = requests.post(url, headers=headers, json=payload, timeout=120)
         if res.status_code != 200: return
         ai_out = res.json()['choices'][0]['message']['content'].strip()
@@ -179,7 +159,7 @@ Output ONLY a JSON ARRAY of objects: ["title", "severity", "url", "full_markdown
             os.makedirs(f"data/{PROGRAM_NAME}/alerts/low", exist_ok=True)
 
             for idx, rep in enumerate(reports):
-                d_id = create_h1_draft(rep['title'], rep['full_markdown'], "Check report.", rep['severity'], rep.get('url', ''))
+                d_id = create_h1_draft(rep['title'], rep['full_markdown'], "See report", rep['severity'], rep.get('url', ''))
                 if d_id in [None, "ALREADY_REPORTED"]: continue
                 
                 sev = rep.get('severity', 'Medium').upper()
@@ -191,6 +171,7 @@ Output ONLY a JSON ARRAY of objects: ["title", "severity", "url", "full_markdown
                 with open(report_path, 'w') as f:
                     f.write(f"# {rep['title']} in {PROGRAM_NAME}\n\n")
                     f.write(f"🆔 **Draft ID:** `{d_id}`\n\n")
+                    # Clean dots
                     f.write(rep['full_markdown'].replace(".#", "#").replace(".##", "##").replace(".###", "###").replace(".```", "```"))
                 
                 print(f"[+] Success: {rep['title']}")
