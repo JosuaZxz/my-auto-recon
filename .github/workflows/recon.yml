@@ -122,36 +122,40 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: NUCLEI CORE SCAN (ULTRA-STEALTH & NO-SKIP)] ---
-                echo "[+] Step 4: Core Scanning (No-Skip Mode)..."
-                
-                # Filter ulang agar hanya hajar target yang bernapas
-                cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405 -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
+                # --- [STEP 4: NUCLEI CORE SCAN (NO-SKIP & VERIFIED)] ---
+          echo "[+] Step 4: Core Scanning... (Checking Peluru First)"
 
-                # Eksekusi dengan -nmhe agar tidak ada host yang di-skip meski banyak error
-                timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
-                  -t /home/runner/nuclei-templates \
-                  -severity critical,high,medium,low \
-                  -et dns,ssl,whois -es info \
-                  -nmhe -rl 10 -c 5 -retries 3 -timeout 15 -no-color -silent \
-                  -disable-clustering \
-                  -H "User-Agent: NovaRecon/2026" \
-                  -jsonl -o "data/$program_name/nuclei_results.json" || true
+          # Verifikasi peluru: Kita hitung jumlah template yang terinstall
+          TEMPLATE_COUNT=$(find /home/runner/nuclei-templates -name "*.yaml" | wc -l)
+          echo "✅ Peluru Check: Found $TEMPLATE_COUNT templates in /home/runner/nuclei-templates"
 
-                # --- [STEP 5: SENSITIVE TOKENS SCAN (NO-SKIP)] ---
-                echo "[+] Step 5: Token Discovery (No-Skip Mode)..."
-                timeout 20m nuclei -l "data/$program_name/final_live_targets.txt" \
-                  -t /home/runner/nuclei-templates \
-                  -tags token,keys,credential,exposure \
-                  -nmhe -rl 10 -c 5 -retries 3 -timeout 15 -no-color -silent \
-                  -H "User-Agent: NovaRecon/2026" \
-                  -jsonl -o "data/$program_name/token_results.json" || true
-                
-                [ -f "data/$program_name/token_results.json" ] && cat "data/$program_name/token_results.json" >> "data/$program_name/nuclei_results.json"
+          # Eksekusi dengan -stats agar kita bisa pantau progress di log GitHub tiap 60 detik
+          timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
+            -t /home/runner/nuclei-templates \
+            -severity critical,high,medium,low \
+            -et dns,ssl,whois -es info \
+            -nmhe -rl 15 -c 5 -retries 3 -timeout 15 -no-color \
+            -stats -stats-interval 60 \
+            -disable-clustering \
+            -H "User-Agent: NovaRecon/2026" \
+            -jsonl -o "data/$program_name/nuclei_results.json" || true
 
-                # STEP 6: AI ANALYSIS
-                echo "[+] Step 6: Grandmaster AI Triage processing..."
-                PROGRAM_NAME=$program_name python scripts/validate.py > /dev/null 2>&1 || true
+          # --- [STEP 5: SENSITIVE TOKENS SCAN (NO-SKIP)] ---
+          echo "[+] Step 5: Token Discovery (No-Skip Mode)..."
+          timeout 20m nuclei -l "data/$program_name/final_live_targets.txt" \
+            -t /home/runner/nuclei-templates \
+            -tags token,keys,credential,exposure \
+            -nmhe -rl 15 -c 5 -retries 3 -timeout 15 -no-color \
+            -stats -stats-interval 60 \
+            -H "User-Agent: NovaRecon/2026" \
+            -jsonl -o "data/$program_name/token_results.json" || true
+          
+          # Gabungkan hasil token ke hasil utama jika ada
+          [ -f "data/$program_name/token_results.json" ] && cat "data/$program_name/token_results.json" >> "data/$program_name/nuclei_results.json"
+
+          # --- [STEP 6: AI ANALYSIS] ---
+          echo "[+] Step 6: Grandmaster AI Triage processing..."
+          PROGRAM_NAME=$program_name python3 scripts/validate.py > /dev/null 2>&1 || true
 
                 # STEP 7: SULTAN NOTIFIKASI (SMART CAPTION & ALL SEVERITIES)
                 # 1. Kirim Bug HIGH / CRITICAL ke Grup Critical
