@@ -122,13 +122,13 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: NUCLEI CORE SCAN (RESTORING ORIGINAL)] ---
-                echo "[+] Step 4: Core Scanning (Original Mode)..."
+                # --- [STEP 4: NUCLEI CORE SCAN (ULTRA-STEALTH & NO-SKIP)] ---
+                echo "[+] Step 4: Core Scanning (No-Skip Mode)..."
                 
-                # Baris krusial yang sempat hilang: Membuat file target untuk Nuclei
+                # Filter ulang agar hanya hajar target yang bernapas
                 cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405 -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
 
-                # Gunakan setelan original Anda (rl 10, c 5) agar sama persis dengan saat di vulnweb
+                # Eksekusi dengan -nmhe agar tidak ada host yang di-skip meski banyak error
                 timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
                   -t /home/runner/nuclei-templates \
                   -severity critical,high,medium,low \
@@ -138,8 +138,8 @@ jobs:
                   -H "User-Agent: NovaRecon/2026" \
                   -jsonl -o "data/$program_name/nuclei_results.json" || true
 
-                # --- [STEP 5: SENSITIVE TOKENS SCAN (RESTORING ORIGINAL)] ---
-                echo "[+] Step 5: Token Discovery (Original Mode)..."
+                # --- [STEP 5: SENSITIVE TOKENS SCAN (NO-SKIP)] ---
+                echo "[+] Step 5: Token Discovery (No-Skip Mode)..."
                 timeout 20m nuclei -l "data/$program_name/final_live_targets.txt" \
                   -t /home/runner/nuclei-templates \
                   -tags token,keys,credential,exposure \
