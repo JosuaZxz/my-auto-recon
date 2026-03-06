@@ -122,20 +122,29 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: NUCLEI CORE SCAN (ULTRA-STEALTH)] ---
+                # --- [STEP 4: NUCLEI CORE SCAN (ANTI-MOGOK MODE)] ---
                 echo "[+] Step 4: Core Scanning... (Deep Mission)"
                 
-                # Pastikan file target dibuat (Jembatan Krusial)
-                cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405 -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
+                # JURUS ANTI-MOGOK: Saring target
+                cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405 -H "User-Agent: Mozilla/5.0" -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
 
-                # Eksekusi Core Scan (KEMBALI KE SETELAN ASLI ANDA)
+                # Jika httpx gagal/kosong, paksa pakai file filtered_endpoints biar Nuclei tetep jalan
+                if [ ! -s "data/$program_name/final_live_targets.txt" ]; then
+                  echo "⚠️ Httpx returned empty, using fallback targets..."
+                  cp "data/$program_name/filtered_endpoints.txt" "data/$program_name/final_live_targets.txt"
+                fi
+
+                echo "🎯 NUCLEI STARTING ON $(wc -l < data/$program_name/final_live_targets.txt) TARGETS"
+
+                # KITA HAPUS -silent BIAR KELIHATAN NUCLEI LAGI NGAPAIN
+                # KITA TAMBAH -stats BIAR TAHU PROGRESSNYA
                 timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
                   -t /home/runner/nuclei-templates \
-                  -severity critical,high,medium,low \
-                  -et dns,ssl,whois -es info \
-                  -nmhe -rl 15 -c 5 -retries 3 -timeout 15 -no-color -silent \
+                  -severity critical,high,medium \
+                  -nmhe -rl 20 -c 10 -retries 2 -timeout 10 -no-color \
+                  -stats -stats-interval 60 \
                   -disable-clustering \
-                  -H "User-Agent: NovaRecon/2026" \
+                  -H "User-Agent: Mozilla/5.0" \
                   -jsonl -o "data/$program_name/nuclei_results.json" || true
 
                 # --- [STEP 5: SENSITIVE TOKENS SCAN] ---
