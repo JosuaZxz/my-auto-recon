@@ -122,36 +122,55 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: CORE VULNERABILITY SCAN (MANUAL STEALTH)] ---
-          echo "[+] Step 4: Core Scanning... (High Impact Focus)"
-          
-          # Jembatan target
-          cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405,500 -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
+                # --- [STEP 4: ENDPOINT SANITIZER (FILTER HARTA KARUN)] ---
+                echo "[*] Filtering trash endpoints for High Priority Mission..."
+                
+                # JURUS PENYARINGAN CERDAS:
+                # 1. Ambil yang ada ? atau = (Lubang Input)
+                # 2. Ambil ekstensi backend & config (Pintu Belakang)
+                # 3. Buang sampah statis (Tembok Beton)
+                cat data/$program_name/filtered_endpoints.txt | \
+                grep -iE "\?|\=|\.php|\.jsp|\.aspx|\.asp|\.json|\.xml|\.conf|\.env|\.yaml|\.git" | \
+                grep -ivE "\.jpg|\.png|\.gif|\.css|\.js|\.woff|\.svg|\.pdf|\.ico|\.ttf|\.otf" | \
+                sort -u > data/$program_name/high_priority_targets.txt
 
-          # JURUS MANUAL: Kita suntikkan UA Chrome asli lewat header -H
-          # Ini pasti jalan dan tidak akan "flag provided but not defined"
-          timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
-            -t /home/runner/nuclei-templates \
-            -severity critical,high,medium \
-            -nmhe -rl 25 -c 10 -retries 2 -timeout 10 -no-color -silent \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
-            -interactsh-server oast.pro \
-            -stats -stats-interval 60 \
-            -jsonl -o "data/$program_name/nuclei_results.json" || true
+                # Hitung target untuk laporan log
+                echo "🎯 BATTLE MAP READY: $(wc -l < data/$program_name/high_priority_targets.txt) High Priority Endpoints Found."
 
-          # --- [STEP 5: SENSITIVE SECRETS SCAN (MANUAL STEALTH)] ---
-          echo "[+] Step 5: Token Discovery... (Looking for Keys)"
-          
-          timeout 25m nuclei -l "data/$program_name/final_live_targets.txt" \
-            -t /home/runner/nuclei-templates \
-            -tags token,keys,credential,exposure,generic-exposure \
-            -severity critical,high,medium \
-            -nmhe -rl 25 -c 10 -no-color -silent \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
-            -stats -stats-interval 60 \
-            -jsonl -o "data/$program_name/token_results.json" || true
-          
-          [ -f "data/$program_name/token_results.json" ] && cat "data/$program_name/token_results.json" >> "data/$program_name/nuclei_results.json"
+                # --- [STEP 5: CORE FUZZING & VULN SCAN (SNIPER DEWASA)] ---
+                echo "[+] Step 5: Core Scanning... (High Speed & Polite Mode)"
+                
+                # LOGIKA: 
+                # -rl 15 : Lebih 'sopan' tapi teliti (Saran AI Sebelah)
+                # -bs 5  : Bulk size kecil agar payload tidak tumpang tindih
+                # -t fuzzing/ -t vulnerabilities/ : Fokus ke peluru paling mematikan
+                timeout 50m nuclei -l "data/$program_name/high_priority_targets.txt" \
+                  -t /home/runner/nuclei-templates/fuzzing \
+                  -t /home/runner/nuclei-templates/vulnerabilities \
+                  -severity critical,high,medium \
+                  -nmhe -rl 15 -bs 5 -retries 2 -timeout 10 -no-color -silent \
+                  -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+                  -interactsh-server oast.pro \
+                  -stats -stats-interval 60 \
+                  -jsonl -o "data/$program_name/nuclei_results.json" || true
+
+                # --- [STEP 6: SENSITIVE SECRETS SCAN (PENCARI KUNCI)] ---
+                echo "[+] Step 6: Token Discovery... (Looking for Keys)"
+                
+                timeout 25m nuclei -l "data/$program_name/high_priority_targets.txt" \
+                  -t /home/runner/nuclei-templates/exposures \
+                  -tags token,keys,credential,exposure \
+                  -severity critical,high,medium \
+                  -nmhe -rl 15 -bs 5 -no-color -silent \
+                  -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+                  -stats -stats-interval 60 \
+                  -jsonl -o "data/$program_name/token_results.json" || true
+                
+                [ -f "data/$program_name/token_results.json" ] && cat "data/$program_name/token_results.json" >> "data/$program_name/nuclei_results.json"
+
+                # --- [STEP 7: AI ANALYSIS] ---
+                echo "[+] Step 7: Grandmaster AI Triage processing..."
+                PROGRAM_NAME=$program_name python3 scripts/validate.py || true
 
                 # --- [STEP 6: AI ANALYSIS] ---
                 echo "[+] Step 6: Grandmaster AI Triage processing..."
