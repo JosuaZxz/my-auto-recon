@@ -122,30 +122,32 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: CORE VULNERABILITY SCAN (FIXED POWER)] ---
+                # --- [STEP 4: CORE VULNERABILITY SCAN (MANUAL STEALTH)] ---
           echo "[+] Step 4: Core Scanning... (High Impact Focus)"
           
           # Jembatan target
           cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405,500 -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
 
-          # JURUS SULTAN: Panggil nuclei pakai path lengkap & flag panjang agar tidak error
-          echo "[*] Launching Sniper Attack..."
-          timeout 50m /home/runner/go/bin/nuclei -l "data/$program_name/final_live_targets.txt" \
+          # JURUS MANUAL: Kita suntikkan UA Chrome asli lewat header -H
+          # Ini pasti jalan dan tidak akan "flag provided but not defined"
+          timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
             -t /home/runner/nuclei-templates \
             -severity critical,high,medium \
-            -random-agent -nmhe -rl 25 -c 10 -retries 2 -timeout 10 -no-color -silent \
+            -nmhe -rl 25 -c 10 -retries 2 -timeout 10 -no-color -silent \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
             -interactsh-server oast.pro \
             -stats -stats-interval 60 \
             -jsonl -o "data/$program_name/nuclei_results.json" || true
 
-          # --- [STEP 5: SENSITIVE SECRETS SCAN (FIXED POWER)] ---
+          # --- [STEP 5: SENSITIVE SECRETS SCAN (MANUAL STEALTH)] ---
           echo "[+] Step 5: Token Discovery... (Looking for Keys)"
           
-          timeout 25m /home/runner/go/bin/nuclei -l "data/$program_name/final_live_targets.txt" \
+          timeout 25m nuclei -l "data/$program_name/final_live_targets.txt" \
             -t /home/runner/nuclei-templates \
             -tags token,keys,credential,exposure,generic-exposure \
             -severity critical,high,medium \
-            -random-agent -nmhe -rl 25 -c 10 -no-color -silent \
+            -nmhe -rl 25 -c 10 -no-color -silent \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
             -stats -stats-interval 60 \
             -jsonl -o "data/$program_name/token_results.json" || true
           
