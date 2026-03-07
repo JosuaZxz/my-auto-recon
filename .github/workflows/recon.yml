@@ -122,37 +122,32 @@ jobs:
                 
                 echo "✅ Done. Targets filtered from $(wc -l < data/$program_name/all_endpoints.txt) to $(wc -l < data/$program_name/filtered_endpoints.txt)"
 
-                # --- [STEP 4: CORE VULNERABILITY SCAN (THE BAZOOKA)] ---
+                # --- [STEP 4: CORE VULNERABILITY SCAN (FIXED FLAG)] ---
           echo "[+] Step 4: Core Scanning... (High Impact Focus)"
           
-          # Jembatan target - Menangkap status 500 (Sinyal SQLi)
           cat data/$program_name/filtered_endpoints.txt | httpx -silent -mc 200,301,302,403,405,500 -o data/$program_name/final_live_targets.txt > /dev/null 2>&1 || true
 
-          # LOGIKA DEWASA: 
-          # 1. -u-a : Nyamar jadi browser random (Anti-WAF)
-          # 2. -interactsh-server oast.pro : Menangkap Blind SSRF/XSS (Harta Karun P1/P2)
-          # 3. -stats : Biar kita gak "buta" nungguin log
+          # PERBAIKAN: -u-a diganti jadi -ua
           timeout 50m nuclei -l "data/$program_name/final_live_targets.txt" \
             -t /home/runner/nuclei-templates \
             -severity critical,high,medium \
-            -u-a -nmhe -rl 25 -c 10 -retries 2 -timeout 10 -no-color -silent \
+            -ua -nmhe -rl 25 -c 10 -retries 2 -timeout 10 -no-color -silent \
             -interactsh-server oast.pro \
             -stats -stats-interval 60 \
             -jsonl -o "data/$program_name/nuclei_results.json" || true
 
-          # --- [STEP 5: SENSITIVE SECRETS SCAN (THE KEY FINDER)] ---
+          # --- [STEP 5: SENSITIVE SECRETS SCAN (FIXED FLAG)] ---
           echo "[+] Step 5: Token Discovery... (Looking for Keys)"
           
-          # Fokus ke tag token/exposure agar tidak buang waktu scan ulang vuln di step 4
+          # PERBAIKAN: -u-a diganti jadi -ua
           timeout 25m nuclei -l "data/$program_name/final_live_targets.txt" \
             -t /home/runner/nuclei-templates \
             -tags token,keys,credential,exposure,generic-exposure \
             -severity critical,high,medium \
-            -u-a -nmhe -rl 25 -c 10 -no-color -silent \
+            -ua -nmhe -rl 25 -c 10 -no-color -silent \
             -stats -stats-interval 60 \
             -jsonl -o "data/$program_name/token_results.json" || true
           
-          # Gabungkan hasil kunci brankas ke hasil utama
           [ -f "data/$program_name/token_results.json" ] && cat "data/$program_name/token_results.json" >> "data/$program_name/nuclei_results.json"
 
                 # --- [STEP 6: AI ANALYSIS] ---
