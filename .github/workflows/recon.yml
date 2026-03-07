@@ -137,29 +137,28 @@ jobs:
                 # Hitung target untuk laporan log
                 echo "🎯 BATTLE MAP READY: $(wc -l < data/$program_name/high_priority_targets.txt) High Priority Endpoints Found."
 
-                # --- [STEP 5: CORE FUZZING & VULN SCAN (SNIPER DEWASA)] ---
+                # --- [STEP 5: CORE FUZZING & VULN SCAN (FIXED PELURU)] ---
                 echo "[+] Step 5: Core Scanning... (High Speed & Polite Mode)"
                 
-                # LOGIKA: 
-                # -rl 15 : Lebih 'sopan' tapi teliti (Saran AI Sebelah)
-                # -bs 5  : Bulk size kecil agar payload tidak tumpang tindih
-                # -t fuzzing/ -t vulnerabilities/ : Fokus ke peluru paling mematikan
+                # Kita arahkan ke folder root templates, lalu filter pakai TAGS
+                # Ini cara paling aman agar tidak error "No templates provided" lagi
                 timeout 50m nuclei -l "data/$program_name/high_priority_targets.txt" \
-                  -t /home/runner/nuclei-templates/fuzzing \
-                  -t /home/runner/nuclei-templates/vulnerabilities \
+                  -t /home/runner/nuclei-templates \
+                  -tags sqli,xss,lfi,ssrf,rce,takeover,fuzz,vulnerability \
                   -severity critical,high,medium \
+                  -exclude-severity low,info \
                   -nmhe -rl 15 -bs 5 -retries 2 -timeout 10 -no-color -silent \
                   -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
                   -interactsh-server oast.pro \
                   -stats -stats-interval 60 \
                   -jsonl -o "data/$program_name/nuclei_results.json" || true
 
-                # --- [STEP 6: SENSITIVE SECRETS SCAN (PENCARI KUNCI)] ---
+                # --- [STEP 6: SENSITIVE SECRETS SCAN (FIXED PELURU)] ---
                 echo "[+] Step 6: Token Discovery... (Looking for Keys)"
                 
-                timeout 25m nuclei -l "data/$program_name/high_priority_targets.txt" \
-                  -t /home/runner/nuclei-templates/exposures \
-                  -tags token,keys,credential,exposure \
+                timeout 25m nuclei -l "data/$program_name/final_live_targets.txt" \
+                  -t /home/runner/nuclei-templates \
+                  -tags token,keys,credential,exposure,generic-exposure \
                   -severity critical,high,medium \
                   -nmhe -rl 15 -bs 5 -no-color -silent \
                   -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
