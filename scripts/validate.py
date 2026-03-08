@@ -1,128 +1,182 @@
 import os
 import json
 import requests
+import subprocess
 import re
 import time
 import hashlib
 from datetime import datetime
 
-# --- [ 1. CONFIGURATION ] ---
+# --- [ CONFIGURATION ] ---
 AI_KEY = os.environ.get("GROQ_API_KEY")
+H1_USER = os.environ.get("H1_USERNAME")
+H1_API_KEY = os.environ.get("H1_API_KEY")
 PROGRAM_NAME = os.environ.get("PROGRAM_NAME", "Unknown")
 SEEN_DB = ".seen_urls"
 
-def extract_ua(request_data):
-    match = re.search(r"User-Agent: (.*)", request_data, re.IGNORECASE)
-    return match.group(1).strip() if match else "Mozilla/5.0 (Stealth Sniper)"
+def get_verification_context(data):
+    info = data.get("info", {})
+    return {
+        "template_id": data.get("template-id", "Unknown"),
+        "template_name": info.get("name", "Unknown Bug Type"),
+        "severity": info.get("severity", "unknown"),
+        "matched_url": data.get("matched-at", data.get("host", "")),
+        "ip": data.get("ip", "Unknown IP"),
+        "request_evidence": data.get("request", "")[:2000],
+        "response_evidence": data.get("response", "")[:2000],
+        "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    }
 
-def get_contextual_snippet(res_raw, data):
-    if not res_raw: return "No Response Data"
-    keys = []
-    if "matcher-name" in data: keys.append(data["matcher-name"])
-    if "extracted-results" in data: keys.extend(data["extracted-results"])
-    keys.extend(["sql syntax", "mysql", "alert(", "<script", "root:x:"])
+def create_h1_draft(title, description, impact, severity, url):
+    url_hash = hashlib.md5(url.encode()).hexdigest()
+    if os.path.exists(SEEN_DB):
+        with open(SEEN_DB, "r") as f:
+            if url_hash in f.read():
+                return "ALREADY_REPORTED"
 
-    target_index = -1
-    for kw in keys:
-        idx = res_raw.lower().find(str(kw).lower())
-        if idx != -1:
-            target_index = idx
-            break
+    # MODE TESTING (Biarkan tanpa memory dulu biar puas testingnya)
+    if PROGRAM_NAME in ["00_test", "test_target"]: 
+        return "TEST-DRAFT-ID-2026"
+
+    target_handle = "hackerone" if PROGRAM_NAME == "hackerone" else PROGRAM_NAME
+    auth = (H1_USER, H1_API_KEY)
+    h1_sev = "high" if severity.lower() in ["critical", "high"] else "medium"
     
-    if target_index == -1: return res_raw[:1000]
+    payload = {"data": {"type": "report-intent", "attributes": {"team_handle": target_handle, "title": title, "description": description, "impact": impact, "severity_rating": h1_sev}}}
     
-    start = max(0, target_index - 500)
-    end = min(len(res_raw), target_index + 500)
-    return f"[...Snipped Context...]\n{res_raw[start:end]}\n[...Snipped Context...]"
+    try:
+        time.sleep(2)
+        res = requests.post("https://api.hackerone.com/v1/hackers/report_intents", auth=auth, headers={"Accept": "application/json"}, json=payload)
+        if res.status_code == 201:
+            with open(SEEN_DB, "a") as f: f.write(f"{url_hash}\n")
+            return res.json()['data']['id']
+    except: pass
+    return None
 
 def validate_findings():
-    print(f"🔍 [MASTER TRIAGE] Engaging: {PROGRAM_NAME}")
+    print(f"🔍 Starting Intelligence Triage for: {PROGRAM_NAME}")
     path = f'data/{PROGRAM_NAME}/nuclei_results.json'
     if not os.path.exists(path) or os.stat(path).st_size == 0: return
 
-    # FIX ENCODING: Baca SEEN_DB dengan utf-8 agar tahan banting
-    seen_hashes = set()
-    if os.path.exists(SEEN_DB):
-        with open(SEEN_DB, "r", encoding='utf-8', errors='ignore') as f:
-            seen_hashes = set(f.read().splitlines())
-
     all_findings = []
-    # FIX ENCODING: Baca hasil Nuclei dengan ignore errors
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+    with open(path, 'r') as f:
         for line in f:
             try:
                 d = json.loads(line)
                 if isinstance(d, list): d = d[0]
-                req = d.get("request", "")
-                res = d.get("response", "")
-                proof = get_contextual_snippet(res, d)
-                if "interaction" in d:
-                    proof = f"OAST Interaction Detected:\n{json.dumps(d['interaction'], indent=2)}"
-
-                all_findings.append({
-                    "template_id": d.get("template-id", "unknown"),
-                    "host": d.get("host", "unknown"),
-                    "url": d.get("matched-at", d.get("host", "")),
-                    "severity": d.get("info", {}).get("severity", "medium").upper(),
-                    "title": d.get("info", {}).get("name", "Unknown Bug"),
-                    "ua": extract_ua(req),
-                    "req_evidence": req[:1500],
-                    "res_evidence": proof
-                })
+                all_findings.append(d)
             except: continue
 
-    all_findings.sort(key=lambda x: {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2}.get(x["severity"], 0), reverse=True)
+    sev_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+    all_findings.sort(key=lambda x: sev_rank.get(x.get("info",{}).get("severity","info").lower(), 0), reverse=True)
 
-    for item in all_findings[:15]:
-        dedupe_key = f"{item['template_id']}_{item['host']}"
-        url_hash = hashlib.md5(dedupe_key.encode()).hexdigest()
+    findings_list = []
+    trash = ["ssl-issuer", "tech-detect", "tls-version", "http-missing-security-headers", "dns-sec", "robots-txt"]
+    for d in all_findings:
+        sev = d.get("info", {}).get("severity", "info").lower()
+        tid = d.get("template-id", "").lower()
+        if sev in ["medium", "high", "critical"] and not any(t in tid for t in trash):
+            findings_list.append(get_verification_context(d))
+        if len(findings_list) >= 20: break
+
+    if not findings_list: return
+
+    # --- TEMPLATE ---
+    luxury_template = """
+.# {title}
+
+.## 📊 Vulnerability Details
+- **Severity:** {severity}
+- **Affected Asset:** `{url}`
+- **Scanner IP:** {ip}
+- **User-Agent:** NovaRecon/2026
+
+.## 📝 Executive Summary
+{summary}
+
+.## 🔍 Technical Analysis
+{technical_explanation}
+
+.## 🚀 Steps To Reproduce (PoC)
+1. **Target:** {url}
+2. **Attack Vector:** {step_2}
+3. **Payload:** `{payload_used}`
+4. **Reproduction Link:** {reproduction_url}
+
+.## 🛡️ Proof of Concept (Evidence)
+.```http
+{request_evidence}
+.```
+.```http
+{response_evidence}
+.```
+
+.## ⚠️ Impact Analysis
+- **Business:** {business_impact}
+- **Technical:** {technical_impact}
+
+.## ✅ Remediation
+{remediation_plan}
+
+"""
+
+    # --- PROMPT CERDAS (EVIDENCE OVER TEMPLATE) ---
+    prompt = f"""Role: Elite Security Researcher.
+Data: {json.dumps(findings_list)}.
+
+Task: Analyze the findings and write a Professional Report.
+
+CRITICAL RULES (FIXING PREVIOUS ERRORS):
+1. EVIDENCE OVER RULING: Look at 'response_evidence'. 
+   - If it contains "SQL syntax error" or "MySQL", YOU MUST REPORT IT AS 'SQL INJECTION', even if the template name says XSS.
+   - SQL Injection is higher impact than XSS. Prioritize it.
+2. CLEAN URLS: If the 'matched_url' looks like a mess (e.g. has multiple paths like /wp-content/ combined with /plugins/), CLEAN IT UP. Only keep the valid path that triggers the bug.
+3. REPRODUCTION URL: Provide a clean, clickable URL.
+4. HIGHLIGHT: Wrap payloads in backticks `<script>`.
+5. REMEDIATION: If you report SQLi, suggest Prepared Statements. If XSS, suggest Encoding.
+
+Template:
+{luxury_template}
+
+Output ONLY a JSON ARRAY: ["title", "severity", "url", "full_markdown"]."""
+
+    try:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {AI_KEY}"}
+        payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
         
-        if url_hash in seen_hashes: continue
+        print(f"[*] Analyzing with AI...")
+        res = requests.post(url, headers=headers, json=payload, timeout=120)
+        if res.status_code != 200: return
+        ai_out = res.json()['choices'][0]['message']['content'].strip()
 
-        print(f"[*] Analyzing: {item['title']} on {item['host']}")
-
-        prompt = f"""You are an Elite Bug Bounty Triager. Analyze:
-{json.dumps(item)}
-
-REQUIRED OUTPUT (STRICT JSON):
-{{
-  "title": "Technical Bug Title",
-  "status": "valid",
-  "full_markdown": "Complete report...",
-  "confidence": 0.9
-}}
-If evidence is weak/404, set "status": "skip"."""
-
-        try:
-            time.sleep(3)
-            res = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {AI_KEY}"},
-                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1})
+        match = re.search(r'\[.*\]|\{.*\}', ai_out, re.DOTALL)
+        if match:
+            reports = json.loads(match.group(0), strict=False)
+            if isinstance(reports, dict): reports = [reports]
             
-            ai_data = res.json()['choices'][0]['message']['content'].strip()
-            clean_json = re.search(r'\{.*\}', ai_data, re.DOTALL)
-            if not clean_json: continue
-            
-            rep = json.loads(clean_json.group(0), strict=False)
-            if rep.get("status") == "skip": continue
+            os.makedirs(f"data/{PROGRAM_NAME}/alerts/high", exist_ok=True)
+            os.makedirs(f"data/{PROGRAM_NAME}/alerts/low", exist_ok=True)
 
-            # FIX ENCODING: Simpan hash
-            with open(SEEN_DB, "a", encoding='utf-8') as f: f.write(f"{url_hash}\n")
-            seen_hashes.add(url_hash)
-            
-            folder = "high" if item['severity'] in ["CRITICAL", "HIGH"] else "low"
-            safe_name = re.sub(r'\W+', '_', rep['title'])[:50]
-            report_path = f"data/{PROGRAM_NAME}/alerts/{folder}/{safe_name}.md"
-            
-            os.makedirs(os.path.dirname(report_path), exist_ok=True)
-            # FIX ENCODING: Simpan report dengan utf-8
-            with open(report_path, 'w', encoding='utf-8') as f:
-                f.write(f"# {rep['title']} in {PROGRAM_NAME}\n\n🆔 **Draft ID:** `TEST-DRAFT-ID-2026`\n\n")
-                f.write(rep['full_markdown'].replace(".#", "#").replace(".##", "##").replace(".```", "```"))
-            
-            print(f"[+] Report Created: {rep['title']}")
+            for idx, rep in enumerate(reports):
+                d_id = create_h1_draft(rep['title'], rep['full_markdown'], "See report", rep['severity'], rep.get('url', ''))
+                if d_id in [None, "ALREADY_REPORTED"]: continue
+                
+                sev = rep.get('severity', 'Medium').upper()
+                folder = "high" if any(x in sev for x in ["CRIT", "HIGH", "P1", "P2"]) else "low"
+                
+                safe_title = re.sub(r'\W+', '_', rep['title'])[:50]
+                report_path = f"data/{PROGRAM_NAME}/alerts/{folder}/{safe_title}_{idx}.md"
+                
+                with open(report_path, 'w') as f:
+                    f.write(f"# {rep['title']} in {PROGRAM_NAME}\n\n")
+                    f.write(f"🆔 **Draft ID:** `{d_id}`\n\n")
+                    # Clean dots
+                    f.write(rep['full_markdown'].replace(".#", "#").replace(".##", "##").replace(".###", "###").replace(".```", "```"))
+                
+                print(f"[+] Success: {rep['title']}")
 
-        except Exception as e: print(f"Error: {e}")
+    except Exception as e: print(f"Error: {e}")
 
 if __name__ == "__main__":
     validate_findings()
