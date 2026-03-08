@@ -12,194 +12,117 @@ PROGRAM_NAME = os.environ.get("PROGRAM_NAME", "Unknown")
 SEEN_DB = ".seen_urls"
 
 def extract_ua(request_data):
-    """Mengambil User-Agent asli dari request mentah Nuclei"""
     match = re.search(r"User-Agent: (.*)", request_data, re.IGNORECASE)
-    return match.group(1).strip() if match else "Mozilla/5.0 (Randomized Stealth)"
+    return match.group(1).strip() if match else "Mozilla/5.0 (Stealth Sniper)"
 
 def get_contextual_snippet(res_raw, data):
-    """
-    LOGIKA SNIPER ELIT: Mencari pusat bukti berdasarkan matcher Nuclei, 
-    bukan sekadar potong 1000 karakter awal.
-    """
     if not res_raw: return "No Response Data"
-    
-    # Kumpulkan kata kunci pencarian dari data Nuclei
-    keywords = []
-    if "matcher-name" in data: keywords.append(data["matcher-name"])
-    if "extracted-results" in data: keywords.extend(data["extracted-results"])
-    
-    # Kata kunci umum jika tidak ada matcher spesifik
-    common_triggers = ["sql syntax", "mysql", "root:x:", "alert(", "<script", "lsass", "metadata"]
-    keywords.extend(common_triggers)
+    keys = []
+    if "matcher-name" in data: keys.append(data["matcher-name"])
+    if "extracted-results" in data: keys.extend(data["extracted-results"])
+    keys.extend(["sql syntax", "mysql", "alert(", "<script", "root:x:"])
 
     target_index = -1
-    for kw in keywords:
+    for kw in keys:
         idx = res_raw.lower().find(str(kw).lower())
         if idx != -1:
             target_index = idx
             break
     
-    # Jika tidak ketemu titik luka, ambil 1000 karakter pertama sebagai fallback
-    if target_index == -1:
-        return res_raw[:1000] + "\n[...Trimmed...]"
-
-    # Ambil 500 karakter sebelum dan 500 setelah titik luka (Window 1000)
+    if target_index == -1: return res_raw[:1000]
+    
     start = max(0, target_index - 500)
     end = min(len(res_raw), target_index + 500)
-    
-    snippet = res_raw[start:end]
-    return f"[...Snipped Context...]\n{snippet}\n[...Snipped Context...]"
-
-def get_verification_context(data):
-    """Mengumpulkan bukti lengkap untuk disuapkan ke AI"""
-    req_raw = data.get("request", "")
-    res_raw = data.get("response", "")
-    
-    # Cek bukti OAST (Interactsh) untuk SSRF/Blind Bugs
-    interaction_info = "NONE"
-    if "interaction" in data:
-        interaction_info = json.dumps(data["interaction"], indent=2)
-
-    return {
-        "template_name": data.get("info", {}).get("name", "Unknown Vulnerability"),
-        "severity": data.get("info", {}).get("severity", "medium").upper(),
-        "matched_url": data.get("matched-at", data.get("host", "")),
-        "ip": data.get("ip", "Unknown"),
-        "real_ua": extract_ua(req_raw),
-        "request_evidence": req_raw[:1500],
-        "response_evidence": get_contextual_snippet(res_raw, data), # SNIPER SHOT!
-        "interaction_evidence": interaction_info
-    }
-
-def create_h1_draft(title, url_hash):
-    """Mencegah spam dengan database .seen_urls"""
-    if os.path.exists(SEEN_DB):
-        with open(SEEN_DB, "r") as f:
-            if url_hash in f.read(): return "ALREADY_REPORTED"
-
-    # MODE TESTING (Selalu catat agar tidak lapor ulang)
-    with open(SEEN_DB, "a") as f: f.write(f"{url_hash}\n")
-    
-    if PROGRAM_NAME in ["00_test", "test_target"]: 
-        return "TEST-DRAFT-ID-2026"
-    
-    return "PRO-HUNTER-DRAFT"
+    return f"[...Snipped Context...]\n{res_raw[start:end]}\n[...Snipped Context...]"
 
 def validate_findings():
-    print(f"🔍 [OPERASI SNIPER] Processing findings for: {PROGRAM_NAME}")
+    print(f"🔍 [MASTER TRIAGE] Engaging: {PROGRAM_NAME}")
     path = f'data/{PROGRAM_NAME}/nuclei_results.json'
-    if not os.path.exists(path) or os.stat(path).st_size == 0: 
-        print("[!] No findings in Nuclei results.")
-        return
+    if not os.path.exists(path) or os.stat(path).st_size == 0: return
+
+    # FIX ENCODING: Baca SEEN_DB dengan utf-8 agar tahan banting
+    seen_hashes = set()
+    if os.path.exists(SEEN_DB):
+        with open(SEEN_DB, "r", encoding='utf-8', errors='ignore') as f:
+            seen_hashes = set(f.read().splitlines())
 
     all_findings = []
-    with open(path, 'r') as f:
+    # FIX ENCODING: Baca hasil Nuclei dengan ignore errors
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
         for line in f:
             try:
                 d = json.loads(line)
                 if isinstance(d, list): d = d[0]
-                all_findings.append(d)
+                req = d.get("request", "")
+                res = d.get("response", "")
+                proof = get_contextual_snippet(res, d)
+                if "interaction" in d:
+                    proof = f"OAST Interaction Detected:\n{json.dumps(d['interaction'], indent=2)}"
+
+                all_findings.append({
+                    "template_id": d.get("template-id", "unknown"),
+                    "host": d.get("host", "unknown"),
+                    "url": d.get("matched-at", d.get("host", "")),
+                    "severity": d.get("info", {}).get("severity", "medium").upper(),
+                    "title": d.get("info", {}).get("name", "Unknown Bug"),
+                    "ua": extract_ua(req),
+                    "req_evidence": req[:1500],
+                    "res_evidence": proof
+                })
             except: continue
 
-    # Urutkan: Critical & High duluan!
-    sev_rank = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
-    all_findings.sort(key=lambda x: sev_rank.get(x.get("info",{}).get("severity","").upper(), 0), reverse=True)
+    all_findings.sort(key=lambda x: {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2}.get(x["severity"], 0), reverse=True)
 
-    processed_count = 0
-    for d in all_findings:
-        if processed_count >= 15: break # Maksimal 15 bug per target biar ga spam
+    for item in all_findings[:15]:
+        dedupe_key = f"{item['template_id']}_{item['host']}"
+        url_hash = hashlib.md5(dedupe_key.encode()).hexdigest()
         
-        ctx = get_verification_context(d)
-        if ctx['severity'] not in ["MEDIUM", "HIGH", "CRITICAL"]: continue
+        if url_hash in seen_hashes: continue
 
-        print(f"[*] Analyzing with AI: {ctx['template_name']} on {ctx['matched_url']}")
+        print(f"[*] Analyzing: {item['title']} on {item['host']}")
 
-        # --- [ PROMPT SULTAN TRIAGE ] ---
-        prompt = f"""Role: Bug Bounty Elite Triage. 
-Finding Data: {json.dumps(ctx)}
+        prompt = f"""You are an Elite Bug Bounty Triager. Analyze:
+{json.dumps(item)}
 
-TASK: Write a professional Bug Bounty Report.
-
-STRICT REPUTATION RULES:
-1. UA SYNC: Vulnerability Details MUST show 'User-Agent: {ctx['real_ua']}'.
-2. SNIPER POC: The 'reproduction_url' MUST be EXACTLY '{ctx['matched_url']}'. Do not change anything.
-3. BLIND BUGS: If 'interaction_evidence' is not 'NONE', prioritize it as the main proof of SSRF/XSS.
-4. VALIDATION: If 'response_evidence' does not show the payload or error, output ONLY: {{"title": "Inconclusive", "status": "skip"}}
-5. QUALITY: Use clear Markdown with technical impact analysis.
-
-Template:
-.# {{title}}
-
-.## 📊 Vulnerability Details
-- **Severity:** {{severity}}
-- **Affected Asset:** `{{url}}`
-- **Scanner IP:** {ctx['ip']}
-- **User-Agent:** {ctx['real_ua']}
-
-.## 📝 Executive Summary
-{{summary}}
-
-.## 🚀 Steps To Reproduce (PoC)
-1. Navigate to {{url}}
-2. Verify the payload behavior.
-3. Reproduction Link: {{url}}
-
-.## 🛡️ Proof of Concept (Evidence)
-.### HTTP Request:
-.```http
-{ctx['request_evidence']}
-.```
-.### HTTP Response/Proof:
-.```http
-{ctx['response_evidence'] if ctx['interaction_evidence'] == 'NONE' else ctx['interaction_evidence']}
-.```
-
-.## ⚠️ Impact Analysis
-- **Technical Impact:** {{tech}}
-- **Business Impact:** {{biz}}
-
-.## ✅ Remediation
-{{plan}}
-"""
+REQUIRED OUTPUT (STRICT JSON):
+{{
+  "title": "Technical Bug Title",
+  "status": "valid",
+  "full_markdown": "Complete report...",
+  "confidence": 0.9
+}}
+If evidence is weak/404, set "status": "skip"."""
 
         try:
-            time.sleep(3) # Anti-429 for Groq
-            res = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+            time.sleep(3)
+            res = requests.post("https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {AI_KEY}"},
-                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
-            )
+                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1})
             
-            if res.status_code != 200: continue
-            ai_out = res.json()['choices'][0]['message']['content'].strip()
+            ai_data = res.json()['choices'][0]['message']['content'].strip()
+            clean_json = re.search(r'\{.*\}', ai_data, re.DOTALL)
+            if not clean_json: continue
             
-            if "Inconclusive" in ai_out:
-                print(f"[!] Evidence inconclusive for {ctx['matched_url']}. Skipping...")
-                continue
+            rep = json.loads(clean_json.group(0), strict=False)
+            if rep.get("status") == "skip": continue
 
-            match = re.search(r'\[.*\]|\{.*\}', ai_out, re.DOTALL)
-            if match:
-                rep = json.loads(match.group(0), strict=False)
-                if isinstance(rep, list): rep = rep[0]
+            # FIX ENCODING: Simpan hash
+            with open(SEEN_DB, "a", encoding='utf-8') as f: f.write(f"{url_hash}\n")
+            seen_hashes.add(url_hash)
+            
+            folder = "high" if item['severity'] in ["CRITICAL", "HIGH"] else "low"
+            safe_name = re.sub(r'\W+', '_', rep['title'])[:50]
+            report_path = f"data/{PROGRAM_NAME}/alerts/{folder}/{safe_name}.md"
+            
+            os.makedirs(os.path.dirname(report_path), exist_ok=True)
+            # FIX ENCODING: Simpan report dengan utf-8
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write(f"# {rep['title']} in {PROGRAM_NAME}\n\n🆔 **Draft ID:** `TEST-DRAFT-ID-2026`\n\n")
+                f.write(rep['full_markdown'].replace(".#", "#").replace(".##", "##").replace(".```", "```"))
+            
+            print(f"[+] Report Created: {rep['title']}")
 
-                url_hash = hashlib.md5(ctx['matched_url'].encode()).hexdigest()
-                d_id = create_h1_draft(rep['title'], url_hash)
-                if d_id == "ALREADY_REPORTED": continue
-                
-                folder = "high" if any(x in ctx['severity'] for x in ["CRIT", "HIGH"]) else "low"
-                safe_title = re.sub(r'\W+', '_', rep['title'])[:50]
-                report_path = f"data/{PROGRAM_NAME}/alerts/{folder}/{safe_title}.md"
-                
-                os.makedirs(os.path.dirname(report_path), exist_ok=True)
-                with open(report_path, 'w') as f:
-                    f.write(f"# {rep['title']} in {PROGRAM_NAME}\n\n🆔 **Draft ID:** `{d_id}`\n\n")
-                    # Clean custom dots for markdown
-                    f.write(rep['full_markdown'].replace(".#", "#").replace(".##", "##").replace(".```", "```"))
-                
-                print(f"[+] Report Created: {rep['title']}")
-                processed_count += 1
-
-        except Exception as e: print(f"Error Triaging: {e}")
+        except Exception as e: print(f"Error: {e}")
 
 if __name__ == "__main__":
     validate_findings()
